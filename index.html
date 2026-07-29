@@ -4,7 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Chrona — Interactive Timeline Explorer</title>
-  <link rel="stylesheet" href="styles.css?v=1.39" />
+  <script>
+    window.CHRONA_ASSET_VERSION = Date.now().toString();
+    document.write(
+      '<link rel="stylesheet" href="styles.css?v=' +
+      window.CHRONA_ASSET_VERSION +
+      '">'
+    );
+  </script>
 </head>
 <body>
   <header class="app-header">
@@ -85,6 +92,12 @@
     </label>
   </template>
 
-  <script src="timeline.js?v=1.39"></script>
+  <script>
+    document.write(
+      '<script src="timeline.js?v=' +
+      window.CHRONA_ASSET_VERSION +
+      '"><\/script>'
+    );
+  </script>
 </body>
 </html>
