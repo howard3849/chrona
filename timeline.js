@@ -525,8 +525,30 @@
 
   function navigationBounds() {
     const dataSpan = Math.max(0.0001, state.maxTime - state.minTime);
-    const leftMargin = Math.max(0.25, Math.min(20, dataSpan * 0.03));
-    const rightMargin = Math.max(2, Math.min(250, dataSpan * 0.18));
+    const visibleSpan = Math.max(
+      MIN_VISIBLE_YEARS,
+      state.viewEnd - state.viewStart
+    );
+    const viewportWidth = Math.max(
+      320,
+      viewport.clientWidth || window.innerWidth || 1200
+    );
+
+    const leftMargin = Math.max(
+      0.25,
+      Math.min(20, dataSpan * 0.03)
+    );
+
+    // Reserve enough time beyond the final event to move its complete label
+    // into view. Point labels can be up to 360 px wide; the additional space
+    // covers padding and the zoom controls at the right edge.
+    const labelClearanceYears = visibleSpan * (440 / viewportWidth);
+    const rightMargin = Math.max(
+      2,
+      dataSpan * 0.03,
+      labelClearanceYears
+    );
+
     return {
       min: state.minTime - leftMargin,
       max: state.maxTime + rightMargin
