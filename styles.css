@@ -1751,3 +1751,28 @@ input::placeholder { color: #737b87 !important; -webkit-text-fill-color: #737b87
   filter: none;
   box-shadow: var(--ui-shadow-clean), var(--ui-inset);
 }
+
+/* Chrona interaction refinement: temporary hover focus, without selection. */
+.event-label {
+  transition: opacity 100ms ease, filter 100ms ease, box-shadow 100ms ease, outline-color 100ms ease;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+}
+.event-label.is-focused {
+  z-index: 5;
+  outline-color: color-mix(in srgb, var(--event-color) 82%, white);
+  box-shadow: 0 6px 18px rgba(15,23,42,.28), 0 0 0 1px color-mix(in srgb, var(--event-color) 80%, transparent);
+  filter: saturate(1.12) brightness(1.06);
+  opacity: 1;
+}
+.timeline-viewport.hover-focus .event-label:not(.is-focused):not(.is-search-match) {
+  opacity: .72;
+}
+.event-label.is-search-dim.is-focused {
+  opacity: .68;
+  filter: saturate(.8) brightness(1.02);
+}
+.event-label.is-search-match.is-focused {
+  opacity: 1;
+  filter: saturate(1.18) brightness(1.08);
+}

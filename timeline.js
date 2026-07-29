@@ -102,6 +102,43 @@
   };
 
   const importanceRank = { Major: 3, Medium: 2, Minor: 1 };
+  const LABEL_GAP = 8;
+  const LABEL_LANE_STEP = 34;
+
+  function normalizeSearchText(value) {
+    return String(value || '')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[‘’'"“”.,:;!?()[\]{}\/_–—-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function rectanglesIntersect(a, b, gap = LABEL_GAP) {
+    return a.x1 < b.x2 + gap && a.x2 > b.x1 - gap &&
+      a.y1 < b.y2 + gap && a.y2 > b.y1 - gap;
+  }
+
+  function recordPriority(event) {
+    const hovered = state.hoveredEvent?.id === event.id ? 1000 : 0;
+    const matched = state.searchQuery.trim() && eventMatchesSearch(event) ? 500 : 0;
+    return hovered + matched + (importanceRank[event.importance] || 2) * 10;
+  }
+
+  function findVerticalLabelSlot(box, occupied, axisY, isAbove, viewportHeight) {
+    const minTop = 10;
+    const maxBottom = viewportHeight - 10;
+    for (let lane = 0; lane < 12; lane++) {
+      const top = isAbove
+        ? axisY - 58 - lane * LABEL_LANE_STEP
+        : axisY + 36 + lane * LABEL_LANE_STEP;
+      const candidate = { ...box, y1: top, y2: top + (box.y2 - box.y1), lane };
+      if (candidate.y1 < minTop || candidate.y2 > maxBottom) continue;
+      if (!occupied.some(other => rectanglesIntersect(candidate, other))) return candidate;
+    }
+    return null;
+  }
   const loadedTimelineThumbnails = new Set();
   const failedTimelineThumbnails = new Set();
 
@@ -199,6 +236,11 @@
     if (event.key === 'Enter') {
       event.preventDefault();
       moveToSearchResult(event.shiftKey ? -1 : 1);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      searchControl.classList.remove('is-open');
+      searchToggle.setAttribute('aria-expanded', 'false');
+      searchInput.blur();
     }
   });
   searchPrevious.addEventListener('click', event => {
@@ -788,10 +830,19 @@
     }
   }
 
+  function setHoveredRecord(event) {
+    const nextId = event?.id || null;
+    if ((state.hoveredEvent?.id || null) === nextId) return;
+    state.hoveredEvent = event || null;
+    viewport.classList.toggle('hover-focus', Boolean(event));
+    scheduleRender();
+  }
+
   function onPointerLeave() {
     state.cursorX = null;
     state.cursorYear = null;
     yearCursor.hidden = true;
+    if (!state.tooltipPinned) setHoveredRecord(null);
     scheduleRender();
     if (!state.tooltipPinned) { tooltip.hidden = true; state.tooltipToken++; }
   }
@@ -804,11 +855,13 @@
     const y = event.clientY - rect.top;
     const target = [...state.hitTargets].reverse().find(t => x >= t.x1 && x <= t.x2 && y >= t.y1 && y <= t.y2);
     if (!target) {
+      setHoveredRecord(null);
       tooltip.hidden = true;
       state.tooltipToken++;
       return;
     }
 
+    setHoveredRecord(target.event);
     const token = ++state.tooltipToken;
     const mediaLink = target.event.media
       ? `<div class="media-link"><a href="${escapeAttribute(mediaDestinationUrl(target.event.media))}" target="_blank" rel="noopener noreferrer">Open media ↗</a><div class="media-url">${escapeHtml(target.event.media)}</div></div>`
@@ -1052,26 +1105,40 @@
   }
 
   // Point events and long-running era blocks are both timeline records.
-  // Search must treat them identically.
   function searchTextForEvent(event) {
     const end = Number.isFinite(event.end) ? event.end : event.start;
+    return normalizeSearchText([
+      event.headline, event.category, event.text, event.displayDate,
+      formatYear(event.start), formatYear(end),
+      `${formatYear(event.start)} ${formatYear(end)}`,
+      event.importance, event.elementType, event.id
+    ].filter(Boolean).join(' '));
+  }
 
-    return [
-      event.headline,
-      event.category,
-      event.text,
-      event.displayDate,
-      formatYear(event.start),
-      formatYear(end),
-      `${formatYear(event.start)}–${formatYear(end)}`,
-      event.importance,
-      event.elementType
-    ].filter(Boolean).join(' ').toLowerCase();
+  function rankSearchRecord(event, query = state.searchQuery) {
+    const q = normalizeSearchText(query);
+    if (!q) return null;
+    const headline = normalizeSearchText(event.headline);
+    const category = normalizeSearchText(event.category);
+    const body = normalizeSearchText(event.text);
+    const displayDate = normalizeSearchText(event.displayDate);
+    const startYear = normalizeSearchText(formatYear(event.start));
+    const endYear = normalizeSearchText(formatYear(Number.isFinite(event.end) ? event.end : event.start));
+    const metadata = normalizeSearchText([event.importance, event.elementType, event.id].join(' '));
+    if (headline === q) return 0;
+    if (headline.startsWith(q)) return 10;
+    if (headline.includes(q)) return 20;
+    if (startYear === q || endYear === q) return 30;
+    if (category === q) return 40;
+    if (category.startsWith(q)) return 50;
+    if (body.includes(q)) return 60;
+    if (displayDate.includes(q)) return 70;
+    if (metadata.includes(q) || searchTextForEvent(event).includes(q)) return 80;
+    return null;
   }
 
   function eventMatchesSearch(event, query = state.searchQuery) {
-    const normalized = String(query || '').trim().toLowerCase();
-    return !normalized || searchTextForEvent(event).includes(normalized);
+    return !normalizeSearchText(query) || rankSearchRecord(event, query) != null;
   }
 
   function isEraBlock(event) {
@@ -1122,8 +1189,10 @@
   }
 
   function drawPointRows(events, width, axisY, isAbove, threshold) {
-    const sorted = [...events].sort((a, b) => a.start - b.start || (importanceRank[b.importance] - importanceRank[a.importance]));
-    const laneEnds = [];
+    const sorted = [...events].sort((a, b) =>
+      recordPriority(b) - recordPriority(a) || a.start - b.start || String(a.id).localeCompare(String(b.id))
+    );
+    const occupiedLabels = [];
     let maxLabelLane = -1;
 
     // Allocate compact micro-lanes for touching or overlapping duration spans.
@@ -1187,19 +1256,23 @@
 
       if (labelLeft < edgePadding || labelRight > usableRight) return;
 
-      let lane = 0;
-      if (showLabel) {
-        while (
-          laneEnds[lane] != null &&
-          labelLeft < laneEnds[lane] + 8
-        ) lane++;
-        laneEnds[lane] = labelRight;
-        maxLabelLane = Math.max(maxLabelLane, lane);
-      }
-
       const labelHeight = 27;
-      const laneGap = 34;
-      const labelTop = isAbove ? axisY - 58 - lane * laneGap : axisY + 36 + lane * laneGap;
+      let placement = null;
+      if (showLabel) {
+        placement = findVerticalLabelSlot(
+          { x1: labelLeft, x2: labelRight, y1: 0, y2: labelHeight, ownerId: event.id },
+          occupiedLabels,
+          axisY,
+          isAbove,
+          viewport.clientHeight || 600
+        );
+        if (placement) {
+          occupiedLabels.push(placement);
+          maxLabelLane = Math.max(maxLabelLane, placement.lane);
+        }
+      }
+      const lane = placement?.lane || 0;
+      const labelTop = placement?.y1 ?? (isAbove ? axisY - 58 : axisY + 36);
       // Enter the owning label by two pixels so the connector cannot appear to
       // stop short at a rounded edge. Duration spans stack outward toward their lane.
       const leaderEndY = isAbove ? labelTop + labelHeight - 2 : labelTop + 2;
@@ -1211,13 +1284,15 @@
       const spanOffset = hasRange ? 3 + microLane * 4 : 0;
       const spanY = hasRange ? axisY + (isAbove ? -spanOffset : spanOffset) : axisY;
 
-      state.pendingLeaders.push({
-        event,
-        x: leaderX,
-        y1: spanY,
-        y2: leaderEndY,
-        ownerId: event.id
-      });
+      if (placement) {
+        state.pendingLeaders.push({
+          event,
+          x: leaderX,
+          y1: spanY,
+          y2: leaderEndY,
+          ownerId: event.id
+        });
+      }
 
       // A ranged event uses a 3 px category-colored span beginning at its
       // exact start date. Touching or overlapping spans occupy separate micro-lanes.
@@ -1257,8 +1332,9 @@
       ctx.globalAlpha = hasSearch && !isSearchMatch ? 0.22 : 1;
 
       const isSelected = state.selectedEvent?.id === event.id;
+      const isHovered = state.hoveredEvent?.id === event.id;
 
-      if (isSelected) {
+      if (isSelected || isHovered) {
         // A light separation ring keeps the selected marker visible against
         // the axis, event spans, and either theme.
         ctx.beginPath();
@@ -1277,7 +1353,7 @@
       }
 
       ctx.fillStyle = event.color;
-      ctx.shadowColor = colorWithAlpha(event.color, isSelected ? .45 : .24);
+      ctx.shadowColor = colorWithAlpha(event.color, (isSelected || isHovered) ? .5 : .24);
       ctx.shadowBlur = isSelected
         ? 10
         : (event.importance === 'Major' ? 8 : 5);
@@ -1286,7 +1362,7 @@
       ctx.arc(
         leaderX,
         spanY,
-        isSelected ? 5.6 : (event.importance === 'Major' ? 4.6 : 3.35),
+        (isSelected || isHovered) ? 5.8 : (event.importance === 'Major' ? 4.6 : 3.35),
         0,
         Math.PI * 2
       );
@@ -1320,7 +1396,7 @@
         });
       }
 
-      if (showLabel) {
+      if (showLabel && placement) {
         const label = document.createElement('div');
         label.className = `event-label ${event.importance.toLowerCase()} ${isAbove ? 'event-label-above' : 'event-label-below'}`;
 
@@ -1356,6 +1432,7 @@
         label.appendChild(labelText);
         label.dataset.eventId = event.id;
         if (state.selectedEvent?.id === event.id) label.classList.add('is-selected');
+        if (state.hoveredEvent?.id === event.id) label.classList.add('is-focused');
         label.style.left = `${labelLeft}px`;
         label.style.top = `${labelTop}px`;
         label.style.setProperty('--event-color', event.color);
@@ -1396,11 +1473,13 @@
   }
 
   function drawPeriodRows(periods, width, height, axisY, threshold, isAbove, pointLaneCount = 0) {
-    const sorted = [...periods].sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+    const sorted = [...periods].sort((a, b) =>
+      recordPriority(b) - recordPriority(a) || a.start - b.start || (b.end - b.start) - (a.end - a.start)
+    );
     const laneEnds = [];
     const layout = [];
-    const barHeight = 28;
-    const laneGap = 36;
+    const baseBarHeight = 24;
+    const laneGap = 34;
     const pointLabelHeight = 27;
     const pointLaneGap = 34;
     const separation = 12;
@@ -1425,13 +1504,14 @@
       ? axisY + 36 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight
       : axisY;
     let firstPeriodY = isAbove
-      ? Math.min(axisY - 112, outermostPointTop - separation - barHeight)
+      ? Math.min(axisY - 112, outermostPointTop - separation - 30)
       : Math.max(axisY + 92, outermostPointBottom + separation);
 
     // Era rows remain anchored to the timeline axis. They may naturally move
     // out of the clipped viewport when the user drags the timeline vertically.
 
     for (const { event, left, right, lane } of layout) {
+      const barHeight = baseBarHeight + (event.importance === 'Major' ? 6 : event.importance === 'Medium' ? 3 : 0);
       const y = isAbove ? firstPeriodY - lane * laneGap : firstPeriodY + lane * laneGap;
       // Canvas clips automatically, but the DOM label layer previously left a
       // faint, partially clipped duplicate at the top edge. Do not create any
@@ -1444,7 +1524,14 @@
       // cleanly occludes any unrelated connector without a square background mask.
 
       ctx.save();
-      ctx.globalAlpha = 1;
+      const hasSearch = Boolean(state.searchQuery.trim());
+      const isSearchMatch = eventMatchesSearch(event);
+      const isHovered = state.hoveredEvent?.id === event.id;
+      ctx.globalAlpha = hasSearch && !isSearchMatch ? (isHovered ? 0.55 : 0.22) : 1;
+      if (isHovered) {
+        ctx.shadowColor = colorWithAlpha(event.color, .55);
+        ctx.shadowBlur = 12;
+      }
       const periodGradient = ctx.createLinearGradient(left, 0, right, 0);
       periodGradient.addColorStop(0, mixHex(periodFill, '#08111f', 0.76));
       periodGradient.addColorStop(0.58, periodFill);
@@ -1546,8 +1633,12 @@
       }
 
       ctx.save();
+      const isHovered = state.hoveredEvent?.id === leader.event.id;
+      const hasSearch = Boolean(state.searchQuery.trim());
+      const isSearchMatch = eventMatchesSearch(leader.event);
+      ctx.globalAlpha = hasSearch && !isSearchMatch ? (isHovered ? .55 : .22) : 1;
       ctx.strokeStyle = colorWithAlpha(leader.event.color, 1);
-      ctx.lineWidth = 2;
+      ctx.lineWidth = isHovered ? 3 : 2;
       ctx.lineCap = 'butt';
 
       for (const [a, b] of segments) {
@@ -1771,11 +1862,10 @@
 
     state.searchMatches = query
       ? state.events
-          .filter(event =>
-            state.enabledCategories.has(event.category) &&
-            eventMatchesSearch(event, query)
-          )
-          .sort((a, b) => a.start - b.start)
+          .map(event => ({ event, rank: state.enabledCategories.has(event.category) ? rankSearchRecord(event, query) : null }))
+          .filter(item => item.rank != null)
+          .sort((a, b) => a.rank - b.rank || a.event.start - b.event.start || String(a.event.id).localeCompare(String(b.event.id)))
+          .map(item => item.event)
       : [];
 
     if (!state.searchMatches.length) {
@@ -1855,19 +1945,49 @@
   }
 
   function onTimelineKeyDown(event) {
-    if (event.key === 'Escape' && !detailPanel.hidden) { closeDetails(); return; }
-    if (!['ArrowLeft','ArrowRight','Enter'].includes(event.key)) return;
-    const candidates = state.events.filter(e => state.enabledCategories.has(e.category)).sort((a,b) => a.start-b.start);
-    if (!candidates.length) return;
-    let index = state.selectedEvent ? candidates.findIndex(e => e.id === state.selectedEvent.id) : -1;
-    if (event.key === 'ArrowRight') index = Math.min(candidates.length - 1, index + 1);
-    if (event.key === 'ArrowLeft') index = Math.max(0, index < 0 ? 0 : index - 1);
-    if (event.key === 'Enter' && state.selectedEvent) { openDetails(state.selectedEvent); return; }
-    state.selectedEvent = candidates[index];
-    const center = state.selectedEvent.start;
+    const tag = event.target?.tagName?.toLowerCase();
+    const typing = ['input', 'textarea', 'select'].includes(tag) || event.target?.isContentEditable;
+    if (typing && event.target !== searchInput) return;
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      state.tooltipPinned = false;
+      tooltip.classList.remove('is-pinned');
+      tooltip.hidden = true;
+      setHoveredRecord(null);
+      if (searchControl.classList.contains('is-open')) {
+        searchControl.classList.remove('is-open');
+        searchToggle.setAttribute('aria-expanded', 'false');
+        searchInput.blur();
+      }
+      return;
+    }
+
+    if (state.searchQuery.trim() && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault();
+      moveToSearchResult(event.key === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
+
     const span = state.viewEnd - state.viewStart;
-    state.viewStart = center - span / 2;
-    state.viewEnd = center + span / 2;
+    const enabled = state.events.filter(e => state.enabledCategories.has(e.category));
+    if (!enabled.length) return;
+    const first = Math.min(...enabled.map(e => e.start));
+    const last = Math.max(...enabled.map(e => Number.isFinite(e.end) ? e.end : e.start));
+    let start = state.viewStart;
+    let end = state.viewEnd;
+
+    if (event.key === 'Home') { start = first; end = first + span; }
+    else if (event.key === 'End') { end = last; start = last - span; }
+    else if (event.key === 'PageUp') { start -= span * .8; end -= span * .8; }
+    else if (event.key === 'PageDown') { start += span * .8; end += span * .8; }
+    else if (event.key === 'ArrowLeft') { start -= span * .12; end -= span * .12; }
+    else if (event.key === 'ArrowRight') { start += span * .12; end += span * .12; }
+    else return;
+
+    event.preventDefault();
+    clampView(start, end);
+    state.selectedEvent = null;
     scheduleRender();
   }
 
