@@ -1139,13 +1139,13 @@
         Math.max(96, Math.min(measuredLabelWidth, usableWidth))
       );
 
-      // Labels normally begin at their event marker. Shift them left when needed
-      // so the complete block stays between the viewport edge and the zoom rail.
-      const labelLeft = Math.max(
-        edgePadding,
-        Math.min(x - 1, usableRight - labelWidth)
-      );
+      // A point-event label always begins at its true event marker. Never move
+      // it left of the vertical event line. If the full label cannot fit in the
+      // usable viewport, omit it until the user pans it back into view.
+      const labelLeft = x - 1;
       const labelRight = labelLeft + labelWidth;
+
+      if (labelLeft < edgePadding || labelRight > usableRight) return;
 
       let lane = 0;
       if (showLabel) {
@@ -1164,12 +1164,8 @@
       // stop short at a rounded edge. Duration spans stack outward toward their lane.
       const leaderEndY = isAbove ? labelTop + labelHeight - 2 : labelTop + 2;
 
-      // Keep the event marker at its true date. When the label shifts left,
-      // the connector bends from the marker to the label edge.
+      // The marker, connector, year, and label all share the true event x.
       const leaderX = Math.round(x) + 0.5;
-      const labelConnectorX = Math.round(
-        (x - labelLeft > 12) ? labelLeft : x
-      ) + 0.5;
 
       const microLane = hasRange ? (durationLanes.get(event.id) || 0) : 0;
       const spanOffset = hasRange ? 3 + microLane * 4 : 0;
@@ -1178,7 +1174,6 @@
       state.pendingLeaders.push({
         event,
         x: leaderX,
-        labelX: labelConnectorX,
         y1: spanY,
         y2: leaderEndY,
         ownerId: event.id
@@ -1445,20 +1440,23 @@
     if (!state.pendingLeaders.length) return;
     const gap = 4;
 
-    const visibleVerticalSegments = (x, y1, y2, ownerId) => {
-      const minY = Math.min(y1, y2);
-      const maxY = Math.max(y1, y2);
+    for (const leader of state.pendingLeaders) {
+      const minY = Math.min(leader.y1, leader.y2);
+      const maxY = Math.max(leader.y1, leader.y2);
       let segments = [[minY, maxY]];
 
+      // Hide portions passing behind unrelated event labels, while preserving
+      // one strictly vertical connector from the true event position.
       for (const zone of state.eventLabelZones) {
-        if (zone.ownerId === ownerId) continue;
-        if (x < zone.x1 - gap || x > zone.x2 + gap) continue;
+        if (zone.ownerId === leader.ownerId) continue;
+        if (leader.x < zone.x1 - gap || leader.x > zone.x2 + gap) continue;
 
         const cut1 = zone.y1 - gap;
         const cut2 = zone.y2 + gap;
 
         segments = segments.flatMap(([a, b]) => {
           if (cut2 <= a || cut1 >= b) return [[a, b]];
+
           const parts = [];
           if (cut1 > a) parts.push([a, Math.min(cut1, b)]);
           if (cut2 < b) parts.push([Math.max(cut2, a), b]);
@@ -1466,71 +1464,17 @@
         });
       }
 
-      return segments;
-    };
-
-    for (const leader of state.pendingLeaders) {
-      const labelX = Number.isFinite(leader.labelX)
-        ? leader.labelX
-        : leader.x;
-
       ctx.save();
       ctx.strokeStyle = colorWithAlpha(leader.event.color, 1);
       ctx.lineWidth = 2;
       ctx.lineCap = 'butt';
-      ctx.lineJoin = 'round';
 
-      if (Math.abs(labelX - leader.x) < 1) {
-        for (const [a, b] of visibleVerticalSegments(
-          leader.x,
-          leader.y1,
-          leader.y2,
-          leader.ownerId
-        )) {
-          if (b - a < 0.5) continue;
-          ctx.beginPath();
-          ctx.moveTo(leader.x, a);
-          ctx.lineTo(leader.x, b);
-          ctx.stroke();
-        }
-      } else {
-        const direction = leader.y2 >= leader.y1 ? 1 : -1;
-        const elbowDistance = Math.min(
-          14,
-          Math.max(8, Math.abs(leader.y2 - leader.y1) * 0.25)
-        );
-        const elbowY = leader.y1 + direction * elbowDistance;
-
-        for (const [a, b] of visibleVerticalSegments(
-          leader.x,
-          leader.y1,
-          elbowY,
-          leader.ownerId
-        )) {
-          if (b - a < 0.5) continue;
-          ctx.beginPath();
-          ctx.moveTo(leader.x, a);
-          ctx.lineTo(leader.x, b);
-          ctx.stroke();
-        }
-
+      for (const [a, b] of segments) {
+        if (b - a < 0.5) continue;
         ctx.beginPath();
-        ctx.moveTo(leader.x, elbowY);
-        ctx.lineTo(labelX, elbowY);
+        ctx.moveTo(leader.x, a);
+        ctx.lineTo(leader.x, b);
         ctx.stroke();
-
-        for (const [a, b] of visibleVerticalSegments(
-          labelX,
-          elbowY,
-          leader.y2,
-          leader.ownerId
-        )) {
-          if (b - a < 0.5) continue;
-          ctx.beginPath();
-          ctx.moveTo(labelX, a);
-          ctx.lineTo(labelX, b);
-          ctx.stroke();
-        }
       }
 
       ctx.restore();
