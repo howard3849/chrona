@@ -1619,3 +1619,135 @@ input::placeholder { color: #737b87 !important; -webkit-text-fill-color: #737b87
     transition: none;
   }
 }
+
+
+/* Chrona event interaction polish */
+
+.event-label.is-selected,
+.period-label.is-selected {
+  filter: saturate(1.12) brightness(1.07);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--event-color) 72%, white),
+    0 8px 22px color-mix(in srgb, var(--event-color) 34%, transparent),
+    var(--ui-inset);
+}
+
+.detail-panel.is-opening {
+  animation: chrona-detail-in 140ms cubic-bezier(.2, .75, .3, 1);
+  transform-origin: var(--detail-transform-origin, center);
+}
+
+@keyframes chrona-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-panel.is-opening {
+    animation: none;
+  }
+}
+
+
+/* Chrona search navigation polish */
+
+.search-results {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 30px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface-solid) 78%, transparent);
+}
+
+.search-results[hidden] {
+  display: none;
+}
+
+.search-results button {
+  width: 27px;
+  min-width: 27px;
+  height: 27px;
+  min-height: 27px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.search-results button:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+#searchResultCount {
+  min-width: 42px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.event-label.is-search-dim {
+  opacity: .20;
+  filter: saturate(.35);
+}
+
+.event-label.is-search-match {
+  opacity: 1;
+  filter: saturate(1.14) brightness(1.06);
+  box-shadow:
+    0 0 0 2px rgba(255,255,255,.92),
+    0 0 0 4px color-mix(in srgb, var(--event-color) 76%, transparent),
+    var(--ui-shadow-clean-hover),
+    var(--ui-inset);
+}
+
+
+/* Chrona hover-only record emphasis */
+
+/*
+ * Point events and era blocks are the same interaction class.
+ * Hover is temporary; there is no persistent selected appearance.
+ */
+.event-label:hover,
+.period-label:hover {
+  opacity: 1;
+  filter: saturate(1.14) brightness(1.08);
+  box-shadow:
+    0 0 0 2px rgba(255,255,255,.96),
+    0 0 0 4px color-mix(
+      in srgb,
+      var(--event-color, #64748b) 78%,
+      transparent
+    ),
+    0 9px 24px color-mix(
+      in srgb,
+      var(--event-color, #64748b) 36%,
+      transparent
+    ),
+    var(--ui-inset);
+  z-index: 20;
+}
+
+/*
+ * Do not show the old persistent selected styling while the detail
+ * panel is disconnected. Search-match styling remains independent.
+ */
+.event-label.is-selected,
+.period-label.is-selected {
+  filter: none;
+  box-shadow: var(--ui-shadow-clean), var(--ui-inset);
+}

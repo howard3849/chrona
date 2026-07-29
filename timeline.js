@@ -10,6 +10,9 @@
   const MIN_VISIBLE_YEARS = 0.08;
   const MAX_VISIBLE_YEARS = 12000;
 
+  // Detail-panel code remains available, but opening it is temporarily disabled.
+  const DETAILS_ENABLED = false;
+
   const canvas = document.getElementById('timelineCanvas');
   const ctx = canvas.getContext('2d');
   const viewport = document.getElementById('timelineViewport');
@@ -30,6 +33,10 @@
   const sheetToggle = document.getElementById('sheetToggle');
   const reloadButton = document.getElementById('reloadData');
   const searchControl = document.querySelector('.search-control');
+  const searchResults = document.getElementById('searchResults');
+  const searchPrevious = document.getElementById('searchPrevious');
+  const searchNext = document.getElementById('searchNext');
+  const searchResultCount = document.getElementById('searchResultCount');
   const detailPanel = document.getElementById('detailPanel');
   const detailContent = document.getElementById('detailContent');
   const detailClose = document.getElementById('detailClose');
@@ -76,6 +83,8 @@
     selectedEvent: null,
     focusedEvent: null,
     searchQuery: '',
+    searchMatches: [],
+    searchMatchIndex: -1,
     detailRestoreView: null,
     detailAnchor: null,
     cursorX: null,
@@ -188,12 +197,17 @@
   searchInput.addEventListener('input', onSearchInput);
   searchInput.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
-      jumpToFirstSearchResult();
-      searchControl.classList.remove('is-open');
-      searchToggle.setAttribute('aria-expanded', 'false');
-      searchToggle.setAttribute('aria-label', 'Open search');
-      searchInput.blur();
+      event.preventDefault();
+      moveToSearchResult(event.shiftKey ? -1 : 1);
     }
+  });
+  searchPrevious.addEventListener('click', event => {
+    event.stopPropagation();
+    moveToSearchResult(-1);
+  });
+  searchNext.addEventListener('click', event => {
+    event.stopPropagation();
+    moveToSearchResult(1);
   });
   viewport.addEventListener('click', onViewportClick);
   viewport.addEventListener('keydown', onTimelineKeyDown);
@@ -1037,6 +1051,33 @@
     return 1;
   }
 
+  // Point events and long-running era blocks are both timeline records.
+  // Search must treat them identically.
+  function searchTextForEvent(event) {
+    const end = Number.isFinite(event.end) ? event.end : event.start;
+
+    return [
+      event.headline,
+      event.category,
+      event.text,
+      event.displayDate,
+      formatYear(event.start),
+      formatYear(end),
+      `${formatYear(event.start)}–${formatYear(end)}`,
+      event.importance,
+      event.elementType
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+
+  function eventMatchesSearch(event, query = state.searchQuery) {
+    const normalized = String(query || '').trim().toLowerCase();
+    return !normalized || searchTextForEvent(event).includes(normalized);
+  }
+
+  function isEraBlock(event) {
+    return Number.isFinite(event.end) && event.end > event.start;
+  }
+
   function drawEvents(width, height, axisY) {
     const q = state.searchQuery.trim().toLowerCase();
     // Keep point labels alive until the complete rendered label has left the
@@ -1047,7 +1088,6 @@
     const labelOverscanYears = timePerPixel * 420;
     const visible = state.events.filter(e => {
       if (!state.enabledCategories.has(e.category)) return false;
-      if (q && !`${e.headline} ${e.category} ${e.text} ${formatYear(e.start)}`.toLowerCase().includes(q)) return false;
       if (e.elementType === 'Period') {
         return e.start <= state.viewEnd && (e.end ?? e.start) >= state.viewStart;
       }
@@ -1211,12 +1251,45 @@
       }
 
       ctx.save();
-      ctx.globalAlpha = 1;
+
+      const hasSearch = Boolean(state.searchQuery.trim());
+      const isSearchMatch = eventMatchesSearch(event);
+      ctx.globalAlpha = hasSearch && !isSearchMatch ? 0.22 : 1;
+
+      const isSelected = state.selectedEvent?.id === event.id;
+
+      if (isSelected) {
+        // A light separation ring keeps the selected marker visible against
+        // the axis, event spans, and either theme.
+        ctx.beginPath();
+        ctx.arc(leaderX, spanY, 9.5, 0, Math.PI * 2);
+        ctx.strokeStyle = cssVar('--surface-solid', '#ffffff');
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(leaderX, spanY, 8, 0, Math.PI * 2);
+        ctx.strokeStyle = event.color;
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = colorWithAlpha(event.color, .48);
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+      }
+
       ctx.fillStyle = event.color;
-      ctx.shadowColor = colorWithAlpha(event.color, .24);
-      ctx.shadowBlur = event.importance === 'Major' ? 8 : 5;
+      ctx.shadowColor = colorWithAlpha(event.color, isSelected ? .45 : .24);
+      ctx.shadowBlur = isSelected
+        ? 10
+        : (event.importance === 'Major' ? 8 : 5);
+
       ctx.beginPath();
-      ctx.arc(leaderX, spanY, state.selectedEvent?.id === event.id ? 6.2 : (event.importance === 'Major' ? 4.6 : 3.35), 0, Math.PI * 2);
+      ctx.arc(
+        leaderX,
+        spanY,
+        isSelected ? 5.6 : (event.importance === 'Major' ? 4.6 : 3.35),
+        0,
+        Math.PI * 2
+      );
       ctx.fill();
       ctx.restore();
       state.hitTargets.push({ event, x1: leaderX - 10, x2: leaderX + 10, y1: spanY - 10, y2: spanY + 10 });
@@ -1250,6 +1323,14 @@
       if (showLabel) {
         const label = document.createElement('div');
         label.className = `event-label ${event.importance.toLowerCase()} ${isAbove ? 'event-label-above' : 'event-label-below'}`;
+
+        if (state.searchQuery.trim()) {
+          label.classList.add(
+            eventMatchesSearch(event)
+              ? 'is-search-match'
+              : 'is-search-dim'
+          );
+        }
         if (timelinePreview && !failedTimelineThumbnails.has(timelinePreview)) {
           const thumbnail = document.createElement('img');
           thumbnail.className = 'event-thumbnail';
@@ -1516,14 +1597,17 @@
   }
 
   function onViewportClick(event) {
-    if (state.movedDuringDrag) { state.movedDuringDrag = false; return; }
-    if (detailPanel.contains(event.target)) return;
-    const target = targetAtClientPoint(event.clientX, event.clientY);
-    if (target) {
-      openDetails(target.event, event.clientX, event.clientY);
+    if (state.movedDuringDrag) {
+      state.movedDuringDrag = false;
       return;
     }
-    if (!detailPanel.hidden) closeDetails();
+
+    // Detail interaction is temporarily disconnected. Clicking an event,
+    // era block, or empty timeline space performs no action.
+    if (state.selectedEvent) {
+      state.selectedEvent = null;
+      scheduleRender();
+    }
   }
 
   function detailMarkup(event) {
@@ -1636,6 +1720,8 @@
   }
 
   function openDetails(event, clientX = null, clientY = null) {
+    if (!DETAILS_ENABLED) return;
+
     state.selectedEvent = event;
     state.detailRestoreView = null;
 
@@ -1656,6 +1742,12 @@
     detailContent.innerHTML = detailMarkup(event);
     detailPanel.hidden = false;
 
+    // Restart the restrained entrance animation when the user selects a
+    // different event while the floating panel is already open.
+    detailPanel.classList.remove('is-opening');
+    void detailPanel.offsetWidth;
+    detailPanel.classList.add('is-opening');
+
     positionDetailPanel(anchor.clientX, anchor.clientY);
     scheduleRender();
   }
@@ -1666,6 +1758,7 @@
     state.detailRestoreView = null;
     state.detailAnchor = null;
     state.selectedEvent = null;
+    detailPanel.classList.remove('is-opening');
     detailPanel.hidden = true;
 
     scheduleRender();
@@ -1673,21 +1766,92 @@
   }
 
 
+  function updateSearchResults() {
+    const query = state.searchQuery.trim();
+
+    state.searchMatches = query
+      ? state.events
+          .filter(event =>
+            state.enabledCategories.has(event.category) &&
+            eventMatchesSearch(event, query)
+          )
+          .sort((a, b) => a.start - b.start)
+      : [];
+
+    if (!state.searchMatches.length) {
+      state.searchMatchIndex = -1;
+      searchResults.hidden = !query;
+      searchResultCount.textContent = '0 / 0';
+      searchPrevious.disabled = true;
+      searchNext.disabled = true;
+      return;
+    }
+
+    if (
+      state.searchMatchIndex < 0 ||
+      state.searchMatchIndex >= state.searchMatches.length
+    ) {
+      state.searchMatchIndex = 0;
+    }
+
+    searchResults.hidden = false;
+    searchResultCount.textContent =
+      `${state.searchMatchIndex + 1} / ${state.searchMatches.length}`;
+    searchPrevious.disabled = false;
+    searchNext.disabled = false;
+  }
+
   function onSearchInput() {
     state.searchQuery = searchInput.value;
+    state.searchMatchIndex = -1;
+    updateSearchResults();
+    scheduleRender();
+  }
+
+  function moveToSearchResult(direction = 1) {
+    updateSearchResults();
+    if (!state.searchMatches.length) return;
+
+    state.searchMatchIndex =
+      (state.searchMatchIndex + direction + state.searchMatches.length) %
+      state.searchMatches.length;
+
+    const event = state.searchMatches[state.searchMatchIndex];
+    const currentSpan = state.viewEnd - state.viewStart;
+
+    if (isEraBlock(event)) {
+      // Era blocks are framed around their complete duration, with modest
+      // context on both sides.
+      const eraSpan = Math.max(1, event.end - event.start);
+      const padding = Math.max(eraSpan * 0.12, 4);
+      const targetStart = event.start - padding;
+      const targetEnd = event.end + padding;
+
+      state.viewStart = targetStart;
+      state.viewEnd = targetEnd;
+    } else {
+      // Point events retain the existing close-up behavior.
+      const targetSpan = Math.min(
+        currentSpan,
+        Math.max(30, Math.min(140, currentSpan))
+      );
+
+      state.viewStart = event.start - targetSpan * 0.42;
+      state.viewEnd = state.viewStart + targetSpan;
+    }
+
+    // Search navigation focuses the viewport only. It must not create
+    // a persistent selected-event state while details are disconnected.
+    state.selectedEvent = null;
+    searchResultCount.textContent =
+      `${state.searchMatchIndex + 1} / ${state.searchMatches.length}`;
+
     scheduleRender();
   }
 
   function jumpToFirstSearchResult() {
-    const q = state.searchQuery.trim().toLowerCase();
-    if (!q) return;
-    const event = state.events.find(e => state.enabledCategories.has(e.category) && `${e.headline} ${e.category} ${e.text} ${formatYear(e.start)}`.toLowerCase().includes(q));
-    if (!event) return;
-    const span = Math.min(Math.max((event.end ?? event.start) - event.start + 20, 40), 160);
-    state.viewStart = event.start - span * .4;
-    state.viewEnd = state.viewStart + span;
-    scheduleRender();
-    openDetails(event);
+    state.searchMatchIndex = -1;
+    moveToSearchResult(1);
   }
 
   function onTimelineKeyDown(event) {

@@ -37,6 +37,11 @@
         <label class="search-box header-field" for="timelineSearch">
           <input id="timelineSearch" type="search" placeholder="Event, category, or year" autocomplete="off" />
         </label>
+        <div id="searchResults" class="search-results" hidden>
+          <button id="searchPrevious" type="button" title="Previous result" aria-label="Previous search result">‹</button>
+          <span id="searchResultCount" aria-live="polite">0 / 0</span>
+          <button id="searchNext" type="button" title="Next result" aria-label="Next search result">›</button>
+        </div>
       </div>
       <div class="theme-control" role="group" aria-label="Appearance">
         <button class="theme-option" data-theme-value="light" type="button" title="Light mode">☀︎</button>
