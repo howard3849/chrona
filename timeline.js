@@ -529,24 +529,18 @@
       MIN_VISIBLE_YEARS,
       state.viewEnd - state.viewStart
     );
-    const viewportWidth = Math.max(
-      320,
-      viewport.clientWidth || window.innerWidth || 1200
-    );
-
     const leftMargin = Math.max(
       0.25,
       Math.min(20, dataSpan * 0.03)
     );
 
-    // Reserve enough time beyond the final event to move its complete label
-    // into view. Point labels can be up to 360 px wide; the additional space
-    // covers padding and the zoom controls at the right edge.
-    const labelClearanceYears = visibleSpan * (440 / viewportWidth);
+    // Permit substantial overscroll beyond the final event. At the furthest
+    // right position, the final event can move to roughly one-quarter of the
+    // viewport, leaving the remaining space available for its complete label.
     const rightMargin = Math.max(
       2,
       dataSpan * 0.03,
-      labelClearanceYears
+      visibleSpan * 0.75
     );
 
     return {
