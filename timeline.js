@@ -533,15 +533,22 @@
       0.25,
       Math.min(20, dataSpan * 0.03)
     );
-
-    // Permit substantial overscroll beyond the final event. At the furthest
-    // right position, the final event can move to roughly one-quarter of the
-    // viewport, leaving the remaining space available for its complete label.
-    const rightMargin = Math.max(
-      2,
-      dataSpan * 0.03,
-      visibleSpan * 0.08
+    // Convert a small, visually consistent amount of screen clearance into
+    // timeline units. This prevents broad views from gaining decades of empty
+    // space while still leaving room after the final event marker.
+    const viewportWidth = Math.max(
+      1,
+      viewport.clientWidth || window.innerWidth || 1
     );
+    const yearsPerPixel = visibleSpan / viewportWidth;
+    const pixelClearance = Math.min(3, yearsPerPixel * 48);
+    const dataClearance = Math.min(2, dataSpan * 0.005);
+
+    const rightMargin = Math.max(
+      pixelClearance,
+      dataClearance
+    );
+
 
     return {
       min: state.minTime - leftMargin,
