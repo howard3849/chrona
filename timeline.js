@@ -1107,11 +1107,27 @@
       const thumbnailAllowance = timelinePreview ? 33 : 0;
       const measuredLabelWidth = Math.ceil(ctx.measureText(event.headline).width + 20 + thumbnailAllowance);
       ctx.restore();
-      const labelWidth = Math.min(360, Math.max(96, measuredLabelWidth));
+      const edgePadding = 8;
+      const labelWidth = Math.min(
+        360,
+        Math.max(96, Math.min(measuredLabelWidth, width - edgePadding * 2))
+      );
+
+      // Point labels normally begin at their event marker. Near either viewport
+      // edge, shift the complete label into view instead of clipping its text.
+      const labelLeft = Math.max(
+        edgePadding,
+        Math.min(x - 1, width - labelWidth - edgePadding)
+      );
+      const labelRight = labelLeft + labelWidth;
+
       let lane = 0;
       if (showLabel) {
-        while (laneEnds[lane] != null && x < laneEnds[lane] + 8) lane++;
-        laneEnds[lane] = x + labelWidth;
+        while (
+          laneEnds[lane] != null &&
+          labelLeft < laneEnds[lane] + 8
+        ) lane++;
+        laneEnds[lane] = labelRight;
         maxLabelLane = Math.max(maxLabelLane, lane);
       }
 
@@ -1224,15 +1240,27 @@
         label.appendChild(labelText);
         label.dataset.eventId = event.id;
         if (state.selectedEvent?.id === event.id) label.classList.add('is-selected');
-        label.style.left = `${leaderX - 1}px`;
+        label.style.left = `${labelLeft}px`;
         label.style.top = `${labelTop}px`;
         label.style.setProperty('--event-color', event.color);
         label.style.setProperty('--event-color-deep', `color-mix(in srgb, ${event.color} 76%, #08111f)`);
         label.style.setProperty('--event-color-light', `color-mix(in srgb, ${event.color} 58%, white)`);
         label.style.maxWidth = `${labelWidth}px`;
         labelLayer.appendChild(label);
-        state.eventLabelZones.push({ x1: leaderX - 1, x2: leaderX - 1 + labelWidth, y1: labelTop, y2: labelTop + labelHeight, ownerId: event.id });
-        state.hitTargets.push({ event, x1: leaderX - 1, x2: leaderX - 1 + labelWidth, y1: labelTop, y2: labelTop + labelHeight });
+        state.eventLabelZones.push({
+          x1: labelLeft,
+          x2: labelRight,
+          y1: labelTop,
+          y2: labelTop + labelHeight,
+          ownerId: event.id
+        });
+        state.hitTargets.push({
+          event,
+          x1: labelLeft,
+          x2: labelRight,
+          y1: labelTop,
+          y2: labelTop + labelHeight
+        });
       }
     });
 
