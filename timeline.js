@@ -1159,7 +1159,15 @@
       // Enter the owning label by two pixels so the connector cannot appear to
       // stop short at a rounded edge. Duration spans stack outward toward their lane.
       const leaderEndY = isAbove ? labelTop + labelHeight - 2 : labelTop + 2;
-      const leaderX = Math.round(x) + 0.5;
+
+      // When a label is shifted left to stay inside the viewport, attach the
+      // connector to the label's left edge instead of letting it pierce the
+      // middle of the label. Small shifts keep the connector under the marker.
+      const connectorX = (x - labelLeft > 12)
+        ? labelLeft
+        : x;
+
+      const leaderX = Math.round(connectorX) + 0.5;
       const microLane = hasRange ? (durationLanes.get(event.id) || 0) : 0;
       const spanOffset = hasRange ? 3 + microLane * 4 : 0;
       const spanY = hasRange ? axisY + (isAbove ? -spanOffset : spanOffset) : axisY;
