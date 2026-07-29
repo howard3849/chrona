@@ -78,6 +78,7 @@
     eventLabelZones: [],
     pendingEventYears: [],
     pendingLeaders: [],
+    pendingMarkers: [],
     renderQueued: false,
     hitTargets: [],
     selectedEvent: null,
@@ -103,7 +104,7 @@
 
   const importanceRank = { Major: 3, Medium: 2, Minor: 1 };
   const LABEL_GAP = 8;
-  const LABEL_LANE_STEP = 34;
+  const LABEL_LANE_STEP = 30;
 
   function normalizeSearchText(value) {
     return String(value || '')
@@ -121,23 +122,27 @@
   }
 
   function recordPriority(event) {
-    const hovered = state.hoveredEvent?.id === event.id ? 1000 : 0;
-    const matched = state.searchQuery.trim() && eventMatchesSearch(event) ? 500 : 0;
-    return hovered + matched + (importanceRank[event.importance] || 2) * 10;
+    // Collision geometry must remain stable while hovering or navigating search.
+    // Only persistent record data may influence lane assignment.
+    return (importanceRank[event.importance] || 2) * 10;
   }
 
-  function findVerticalLabelSlot(box, occupied, axisY, isAbove, viewportHeight) {
-    const minTop = 10;
-    const maxBottom = viewportHeight - 10;
-    for (let lane = 0; lane < 12; lane++) {
+  function findVerticalLabelSlot(box, occupied, axisY, isAbove) {
+    // Every visible record receives a stable lane, even when that lane falls
+    // outside the current viewport. Vertical panning reveals those pre-existing
+    // lanes; labels are never suppressed merely because the screen is crowded.
+    for (let lane = 0; ; lane++) {
       const top = isAbove
         ? axisY - 58 - lane * LABEL_LANE_STEP
         : axisY + 36 + lane * LABEL_LANE_STEP;
       const candidate = { ...box, y1: top, y2: top + (box.y2 - box.y1), lane };
-      if (candidate.y1 < minTop || candidate.y2 > maxBottom) continue;
-      if (!occupied.some(other => rectanglesIntersect(candidate, other))) return candidate;
+      const collidesInLane = occupied.some(other =>
+        other.lane === lane &&
+        candidate.x1 < other.x2 + LABEL_GAP &&
+        candidate.x2 > other.x1 - LABEL_GAP
+      );
+      if (!collidesInLane) return candidate;
     }
-    return null;
   }
   const loadedTimelineThumbnails = new Set();
   const failedTimelineThumbnails = new Set();
@@ -162,6 +167,7 @@
   document.getElementById('zoomReset').addEventListener('click', resetView);
   zoomDial.addEventListener('pointerdown', event => {
     state.zoomDialActive = true;
+    clearHoverTooltip();
     viewport.classList.add('is-dial-zooming');
     zoomDial.setPointerCapture?.(event.pointerId);
     updateZoomDialFromPointer(event);
@@ -174,6 +180,8 @@
   zoomDial.addEventListener('pointerup', endDialZoom);
   zoomDial.addEventListener('pointercancel', endDialZoom);
   zoomDial.addEventListener('change', endDialZoom);
+  zoomRail?.addEventListener('pointerenter', clearHoverTooltip);
+  zoomRail?.addEventListener('pointermove', clearHoverTooltip);
   primaryCategorySelect.addEventListener('change', () => {
     state.primaryCategory = primaryCategorySelect.value || null;
     scheduleRender();
@@ -188,11 +196,25 @@
   viewport.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('pointerup', onGlobalPointerEnd);
   window.addEventListener('pointercancel', onGlobalPointerEnd);
+  viewport.addEventListener('lostpointercapture', clearPointerInteraction);
+  window.addEventListener('blur', resetTransientInteractionState);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) resetTransientInteractionState();
+  });
   viewport.addEventListener('pointerleave', onPointerLeave);
   viewport.addEventListener('mousemove', onHoverMove);
-  tooltip.addEventListener('mouseenter', () => { state.tooltipPinned = true; });
-  tooltip.addEventListener('mouseleave', () => { if (!state.tooltipPinned) tooltip.hidden = true; });
-  tooltip.addEventListener('click', event => { event.stopPropagation(); state.tooltipPinned = !state.tooltipPinned; tooltip.classList.toggle('is-pinned', state.tooltipPinned); });
+  tooltip.addEventListener('mouseenter', () => {
+    // Keep the current tooltip open while the pointer is over interactive content.
+    state.tooltipPinned = true;
+  });
+  tooltip.addEventListener('mouseleave', () => {
+    state.tooltipPinned = false;
+    tooltip.classList.remove('is-pinned');
+    tooltip.hidden = true;
+    state.tooltipToken++;
+    setHoveredRecord(null);
+  });
+  tooltip.addEventListener('click', event => event.stopPropagation());
   window.addEventListener('resize', () => {
     scheduleRender();
     if (!detailPanel.hidden && state.detailAnchor) {
@@ -792,6 +814,15 @@
     }
   }
 
+  function resetTransientInteractionState() {
+    clearPointerInteraction();
+    state.tooltipPinned = false;
+    tooltip.classList.remove('is-pinned');
+    tooltip.hidden = true;
+    state.tooltipToken++;
+    setHoveredRecord(null);
+  }
+
   function clearPointerInteraction() {
     state.pointerMap.clear();
     state.dragStartX = null;
@@ -833,9 +864,9 @@
   function setHoveredRecord(event) {
     const nextId = event?.id || null;
     if ((state.hoveredEvent?.id || null) === nextId) return;
+    // Hover is tooltip/cursor state only. It must not redraw, dim, resize, or
+    // otherwise repaint the timeline scene.
     state.hoveredEvent = event || null;
-    viewport.classList.toggle('hover-focus', Boolean(event));
-    scheduleRender();
   }
 
   function onPointerLeave() {
@@ -847,9 +878,36 @@
     if (!state.tooltipPinned) { tooltip.hidden = true; state.tooltipToken++; }
   }
 
+  function isOverTimelineControl(event) {
+    if (state.zoomDialActive) return true;
+    if (event.target.closest?.('.zoom-rail')) return true;
+    const railRect = zoomRail?.getBoundingClientRect();
+    return Boolean(railRect &&
+      event.clientX >= railRect.left && event.clientX <= railRect.right &&
+      event.clientY >= railRect.top && event.clientY <= railRect.bottom);
+  }
+
+  function clearHoverTooltip() {
+    state.tooltipPinned = false;
+    tooltip.classList.remove('is-pinned');
+    tooltip.hidden = true;
+    state.tooltipToken++;
+    setHoveredRecord(null);
+  }
+
   function onHoverMove(event) {
     updateYearCursor(event);
-    if (state.pointerMap.size || state.tooltipPinned) { tooltip.hidden = true; state.tooltipToken++; return; }
+    if (isOverTimelineControl(event)) {
+      clearHoverTooltip();
+      return;
+    }
+    if (state.tooltipPinned && !tooltip.matches(':hover')) state.tooltipPinned = false;
+    if (state.pointerMap.size) {
+      tooltip.hidden = true;
+      state.tooltipToken++;
+      return;
+    }
+    if (state.tooltipPinned) return;
     const rect = viewport.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -945,6 +1003,7 @@
     state.eventLabelZones = [];
     state.pendingEventYears = [];
     state.pendingLeaders = [];
+    state.pendingMarkers = [];
 
     const axisY = rect.height * state.axisYRatio;
     drawBackground(rect.width, rect.height);
@@ -1147,21 +1206,10 @@
 
   function drawEvents(width, height, axisY) {
     const q = state.searchQuery.trim().toLowerCase();
-    // Keep point labels alive until the complete rendered label has left the
-    // viewport. Culling by the event anchor caused long labels to disappear
-    // abruptly as soon as their dot crossed an edge. A 420 px time overscan is
-    // larger than the maximum event-label width and is recomputed at every zoom.
-    const timePerPixel = (state.viewEnd - state.viewStart) / Math.max(1, width);
-    const labelOverscanYears = timePerPixel * 420;
-    const visible = state.events.filter(e => {
-      if (!state.enabledCategories.has(e.category)) return false;
-      if (e.elementType === 'Period') {
-        return e.start <= state.viewEnd && (e.end ?? e.start) >= state.viewStart;
-      }
-      const hasRange = Number.isFinite(e.end) && e.end > e.start;
-      const anchor = e.start;
-      return anchor >= state.viewStart - labelOverscanYears && anchor <= state.viewEnd + labelOverscanYears;
-    });
+    // Keep every enabled record in the layout at all times. The viewport clips
+    // offscreen content naturally; horizontal pan bounds control navigation.
+    // This also keeps lane assignments stable while panning near either edge.
+    const visible = state.events.filter(e => state.enabledCategories.has(e.category));
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
     const above = visible.filter(e => e.category === state.primaryCategory);
     const below = visible.filter(e => e.category !== state.primaryCategory);
@@ -1181,6 +1229,10 @@
     // so passing connectors never appear attached to an unrelated era block.
     drawPeriodRows(abovePeriods, width, height, axisY, threshold, true, abovePointLanes);
     drawPeriodRows(belowPeriods, width, height, axisY, threshold, false, belowPointLanes);
+
+    // Markers and hover/focus rings are the final canvas pass so duration and
+    // period bars can never cover them.
+    drawTopMarkers();
   }
 
   function resolvePosition(event) {
@@ -1213,9 +1265,6 @@
       const x = timeToX(anchorTime, width);
       const startX = x;
       const endX = hasRange ? timeToX(event.end, width) : startX;
-      const visibleRangeLeft = Math.min(startX, endX);
-      const visibleRangeRight = Math.max(startX, endX);
-      if (visibleRangeRight < -40 || visibleRangeLeft > width + 40) return;
       const showLabel = (importanceRank[event.importance] || 2) >= threshold;
       ctx.save();
       ctx.font = `${event.importance === 'Major' ? '650' : '520'} 13px -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif`;
@@ -1223,38 +1272,11 @@
       const thumbnailAllowance = timelinePreview ? 33 : 0;
       const measuredLabelWidth = Math.ceil(ctx.measureText(event.headline).width + 20 + thumbnailAllowance);
       ctx.restore();
-      const edgePadding = 8;
-
-      // The zoom rail overlays the right side of the timeline. Treat the area
-      // beneath it as unavailable so labels remain fully readable when zoomed out.
-      const viewportRect = viewport.getBoundingClientRect();
-      const zoomRailRect = zoomRail?.getBoundingClientRect();
-      const zoomRailLeft = zoomRailRect
-        ? zoomRailRect.left - viewportRect.left
-        : width;
-
-      const usableRight = Math.max(
-        edgePadding + 96,
-        Math.min(width - edgePadding, zoomRailLeft - 10)
-      );
-      const usableWidth = Math.max(96, usableRight - edgePadding);
-
-      // Labels may shift to remain readable near an edge, but they must not
-      // remain pinned onscreen after their actual event marker has left view.
-      if (x < edgePadding || x > usableRight) return;
-
-      const labelWidth = Math.min(
-        360,
-        Math.max(96, Math.min(measuredLabelWidth, usableWidth))
-      );
-
-      // A point-event label always begins at its true event marker. Never move
-      // it left of the vertical event line. If the full label cannot fit in the
-      // usable viewport, omit it until the user pans it back into view.
+      // Labels always begin at the true event marker and always remain in the
+      // layout. The label layer clips any portion outside the viewport.
+      const labelWidth = Math.min(360, Math.max(96, measuredLabelWidth));
       const labelLeft = x - 1;
       const labelRight = labelLeft + labelWidth;
-
-      if (labelLeft < edgePadding || labelRight > usableRight) return;
 
       const labelHeight = 27;
       let placement = null;
@@ -1263,8 +1285,7 @@
           { x1: labelLeft, x2: labelRight, y1: 0, y2: labelHeight, ownerId: event.id },
           occupiedLabels,
           axisY,
-          isAbove,
-          viewport.clientHeight || 600
+          isAbove
         );
         if (placement) {
           occupiedLabels.push(placement);
@@ -1325,49 +1346,7 @@
         }
       }
 
-      ctx.save();
-
-      const hasSearch = Boolean(state.searchQuery.trim());
-      const isSearchMatch = eventMatchesSearch(event);
-      ctx.globalAlpha = hasSearch && !isSearchMatch ? 0.22 : 1;
-
-      const isSelected = state.selectedEvent?.id === event.id;
-      const isHovered = state.hoveredEvent?.id === event.id;
-
-      if (isSelected || isHovered) {
-        // A light separation ring keeps the selected marker visible against
-        // the axis, event spans, and either theme.
-        ctx.beginPath();
-        ctx.arc(leaderX, spanY, 9.5, 0, Math.PI * 2);
-        ctx.strokeStyle = cssVar('--surface-solid', '#ffffff');
-        ctx.lineWidth = 4;
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(leaderX, spanY, 8, 0, Math.PI * 2);
-        ctx.strokeStyle = event.color;
-        ctx.lineWidth = 2.5;
-        ctx.shadowColor = colorWithAlpha(event.color, .48);
-        ctx.shadowBlur = 10;
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = event.color;
-      ctx.shadowColor = colorWithAlpha(event.color, (isSelected || isHovered) ? .5 : .24);
-      ctx.shadowBlur = isSelected
-        ? 10
-        : (event.importance === 'Major' ? 8 : 5);
-
-      ctx.beginPath();
-      ctx.arc(
-        leaderX,
-        spanY,
-        (isSelected || isHovered) ? 5.8 : (event.importance === 'Major' ? 4.6 : 3.35),
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-      ctx.restore();
+      state.pendingMarkers.push({ event, x: leaderX, y: spanY });
       state.hitTargets.push({ event, x1: leaderX - 10, x2: leaderX + 10, y1: spanY - 10, y2: spanY + 10 });
       state.hitTargets.push({ event, x1: leaderX - 5, x2: leaderX + 5, y1: Math.min(spanY, leaderEndY), y2: Math.max(spanY, leaderEndY) });
 
@@ -1460,6 +1439,50 @@
     return maxLabelLane + 1;
   }
 
+
+  function drawTopMarkers() {
+    for (const marker of state.pendingMarkers) {
+      const { event, x, y } = marker;
+      const hasSearch = Boolean(state.searchQuery.trim());
+      const isSearchMatch = eventMatchesSearch(event);
+      const isSelected = state.selectedEvent?.id === event.id;
+      const isHovered = state.hoveredEvent?.id === event.id;
+
+      ctx.save();
+      ctx.globalAlpha = hasSearch && !isSearchMatch ? 0.22 : 1;
+
+      if (isSelected || isHovered) {
+        ctx.beginPath();
+        ctx.arc(x, y, 9.5, 0, Math.PI * 2);
+        ctx.strokeStyle = cssVar('--surface-solid', '#ffffff');
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.strokeStyle = event.color;
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = colorWithAlpha(event.color, .48);
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = event.color;
+      ctx.shadowColor = colorWithAlpha(event.color, (isSelected || isHovered) ? .5 : .24);
+      ctx.shadowBlur = isSelected ? 10 : (event.importance === 'Major' ? 8 : 5);
+      ctx.beginPath();
+      ctx.arc(
+        x,
+        y,
+        (isSelected || isHovered) ? 5.8 : (event.importance === 'Major' ? 4.6 : 3.35),
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   function mixHex(colorA, colorB, amount) {
     const parse = value => {
       const hex = String(value || '').trim().replace('#', '');
@@ -1489,7 +1512,7 @@
       const x2 = timeToX(event.end, width);
       const left = Math.min(x1, x2);
       const right = Math.max(x1, x2);
-      if (right <= 0 || left >= width || right <= left) continue;
+      if (right <= left) continue;
       let lane = 0;
       while (laneEnds[lane] != null && left < laneEnds[lane] + 8) lane++;
       laneEnds[lane] = right;
@@ -1513,10 +1536,6 @@
     for (const { event, left, right, lane } of layout) {
       const barHeight = baseBarHeight + (event.importance === 'Major' ? 6 : event.importance === 'Medium' ? 3 : 0);
       const y = isAbove ? firstPeriodY - lane * laneGap : firstPeriodY + lane * laneGap;
-      // Canvas clips automatically, but the DOM label layer previously left a
-      // faint, partially clipped duplicate at the top edge. Do not create any
-      // period block or text when its complete row is outside the viewport.
-      if (y + barHeight <= 0 || y >= height) continue;
       const periodFill = event.color;
       const periodWidth = Math.max(2, right - left);
       const periodRadius = Math.min(10, barHeight / 2, periodWidth / 2);

@@ -362,7 +362,6 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
 .lane-caption-top { top:72px; }
 .lane-caption-bottom { top:50%; margin-top:34px; }
 .timeline-viewport.has-focus .label-layer,.timeline-viewport.has-focus canvas { filter:saturate(.45) opacity(.36); }
-.timeline-viewport.hover-focus .event-label:not(.is-focused), .timeline-viewport.hover-focus .period-label:not(.is-focused) { opacity:.30; filter:saturate(.45); }
 .event-label.is-selected,.period-label.is-selected { box-shadow:0 7px 22px rgba(15,23,42,.28); filter:saturate(1.12) brightness(1.04); }
 @media (max-width:760px){ .detail-panel{left:0;right:0;top:auto;bottom:0;width:auto;max-height:52%;border-left:0;border-top:1px solid var(--border-strong);} .search-box{width:100%}.search-box input{flex:1;width:auto}.overview-navigator{padding-left:10px;padding-right:10px}.overview-heading span:last-child{display:none}.lane-caption{display:none} }
 
@@ -381,12 +380,6 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
 .tooltip-image-slot[hidden] { display: none !important; }
 .tooltip-image-slot { margin: 8px 0; }
 .tooltip-thumbnail { margin: 0; }
-.timeline-viewport.hover-focus .event-label:not(.is-focused),
-.timeline-viewport.hover-focus .period-label:not(.is-focused) {
-  opacity: 1;
-  filter: none;
-}
-
 #status.status-warning {
   display: inline-block;
   margin-top: 8px;
