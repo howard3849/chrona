@@ -540,7 +540,7 @@
     const rightMargin = Math.max(
       2,
       dataSpan * 0.03,
-      visibleSpan * 0.75
+      visibleSpan * 0.08
     );
 
     return {
