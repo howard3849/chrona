@@ -1108,16 +1108,31 @@
       const measuredLabelWidth = Math.ceil(ctx.measureText(event.headline).width + 20 + thumbnailAllowance);
       ctx.restore();
       const edgePadding = 8;
+
+      // The zoom rail overlays the right side of the timeline. Treat the area
+      // beneath it as unavailable so labels remain fully readable when zoomed out.
+      const viewportRect = viewport.getBoundingClientRect();
+      const zoomRailRect = zoomRail?.getBoundingClientRect();
+      const zoomRailLeft = zoomRailRect
+        ? zoomRailRect.left - viewportRect.left
+        : width;
+
+      const usableRight = Math.max(
+        edgePadding + 96,
+        Math.min(width - edgePadding, zoomRailLeft - 10)
+      );
+      const usableWidth = Math.max(96, usableRight - edgePadding);
+
       const labelWidth = Math.min(
         360,
-        Math.max(96, Math.min(measuredLabelWidth, width - edgePadding * 2))
+        Math.max(96, Math.min(measuredLabelWidth, usableWidth))
       );
 
-      // Point labels normally begin at their event marker. Near either viewport
-      // edge, shift the complete label into view instead of clipping its text.
+      // Labels normally begin at their event marker. Shift them left when needed
+      // so the complete block stays between the viewport edge and the zoom rail.
       const labelLeft = Math.max(
         edgePadding,
-        Math.min(x - 1, width - labelWidth - edgePadding)
+        Math.min(x - 1, usableRight - labelWidth)
       );
       const labelRight = labelLeft + labelWidth;
 
