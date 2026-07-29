@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chrona — Interactive Timeline Explorer</title>
+  <link rel="stylesheet" href="styles.css?v=1.35" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-block">
+      <h1>Chrona</h1>
+      <div class="subtitle">Interactive Timeline Explorer</div>
+      <p id="status">Loading timeline data…</p>
+    </div>
+    <div class="header-actions">
+      <div id="sheetControl" class="sheet-control" role="group" aria-label="Google Sheet source">
+        <button id="sheetToggle" class="header-icon-toggle" type="button" title="Sheet URL" aria-label="Open Sheet URL" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h9l5 5V20.5H5z"></path><path d="M14 3.5v5h5"></path><path d="M8 13h8M8 16h8"></path></svg>
+        </button>
+        <label class="sheet-url header-field" for="sheetUrl">
+          <input id="sheetUrl" type="url" spellcheck="false" aria-label="Sheet URL" />
+        </label>
+        <button id="reloadData" type="button">Reload</button>
+      </div>
+      <div class="search-control" role="group" aria-label="Timeline search">
+        <button id="searchToggle" class="search-toggle" type="button" title="Search timeline" aria-label="Open search" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
+        </button>
+        <label class="search-box header-field" for="timelineSearch">
+          <input id="timelineSearch" type="search" placeholder="Event, category, or year" autocomplete="off" />
+        </label>
+      </div>
+      <div class="theme-control" role="group" aria-label="Appearance">
+        <button class="theme-option" data-theme-value="light" type="button" title="Light mode">☀︎</button>
+        <button class="theme-option" data-theme-value="auto" type="button" title="Follow system appearance">◐</button>
+        <button class="theme-option" data-theme-value="dark" type="button" title="Dark mode">☾</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="toolbar">
+    <label class="primary-set">
+      <span>Primary set</span>
+      <select id="primaryCategory" aria-label="Primary category displayed above the timeline"></select>
+    </label>
+    <div id="categoryFilters" class="category-filters"></div>
+  </section>
+
+  <main>
+    <div id="timelineViewport" class="timeline-viewport" tabindex="0" aria-label="Chrona interactive timeline explorer">
+      <canvas id="timelineCanvas"></canvas>
+      <div id="labelLayer" class="label-layer"></div>
+      <div id="tooltip" class="tooltip" hidden></div>
+      <aside id="detailPanel" class="detail-panel" hidden aria-label="Timeline item details" aria-modal="false">
+        <button id="detailClose" class="detail-close" type="button" aria-label="Close details">×</button>
+        <div id="detailContent"></div>
+      </aside>
+      <div id="overviewNavigator" class="overview-navigator" aria-label="Timeline overview; click or drag to move, double-click for full extent" title="Click or drag to move the view; double-click to show the full timeline"><canvas id="overviewCanvas"></canvas><div id="overviewWindow" class="overview-window"></div></div>
+      <div id="laneCaptionTop" class="lane-caption lane-caption-top"></div>
+      <div id="laneCaptionBottom" class="lane-caption lane-caption-bottom"></div>
+      <div id="yearCursor" class="year-cursor" hidden aria-hidden="true"><div id="yearCursorLabel" class="year-cursor-label"></div></div>
+      <div class="zoom-rail" aria-label="Timeline zoom controls">
+        <button id="zoomIn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+        <button id="zoomOut" type="button" title="Zoom out" aria-label="Zoom out">−</button>
+        <button id="zoomReset" type="button" title="Reset view" aria-label="Reset view">↺</button>
+        <div class="zoom-range-wrap"><span>Max</span><input id="zoomDial" type="range" min="0" max="100" step="0.25" value="50" aria-label="Zoom level" /><span>Min</span></div>
+      </div>
+    </div>
+  </main>
+
+  <template id="filterTemplate">
+    <label class="filter-chip">
+      <input type="checkbox" checked />
+      <span class="filter-name"></span>
+    </label>
+  </template>
+
+  <script src="timeline.js?v=1.36"></script>
+</body>
+</html>
