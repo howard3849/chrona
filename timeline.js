@@ -77,6 +77,7 @@
     focusedEvent: null,
     searchQuery: '',
     detailRestoreView: null,
+    detailAnchor: null,
     cursorX: null,
     cursorYear: null,
     viewAnimationRaf: null,
@@ -146,7 +147,15 @@
   tooltip.addEventListener('mouseenter', () => { state.tooltipPinned = true; });
   tooltip.addEventListener('mouseleave', () => { if (!state.tooltipPinned) tooltip.hidden = true; });
   tooltip.addEventListener('click', event => { event.stopPropagation(); state.tooltipPinned = !state.tooltipPinned; tooltip.classList.toggle('is-pinned', state.tooltipPinned); });
-  window.addEventListener('resize', scheduleRender);
+  window.addEventListener('resize', () => {
+    scheduleRender();
+    if (!detailPanel.hidden && state.detailAnchor) {
+      positionDetailPanel(
+        state.detailAnchor.clientX,
+        state.detailAnchor.clientY
+      );
+    }
+  });
   detailClose.addEventListener('pointerdown', event => { event.preventDefault(); event.stopPropagation(); closeDetails(); });
   detailClose.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); closeDetails(); });
   function closeSheetControl() {
@@ -516,8 +525,12 @@
 
   function navigationBounds() {
     const dataSpan = Math.max(0.0001, state.maxTime - state.minTime);
-    const margin = Math.max(0.25, Math.min(10, dataSpan * 0.02));
-    return { min: state.minTime - margin, max: state.maxTime + margin };
+    const leftMargin = Math.max(0.25, Math.min(20, dataSpan * 0.03));
+    const rightMargin = Math.max(2, Math.min(250, dataSpan * 0.18));
+    return {
+      min: state.minTime - leftMargin,
+      max: state.maxTime + rightMargin
+    };
   }
 
   function clampView(start = state.viewStart, end = state.viewEnd) {
@@ -1416,7 +1429,10 @@
     if (state.movedDuringDrag) { state.movedDuringDrag = false; return; }
     if (detailPanel.contains(event.target)) return;
     const target = targetAtClientPoint(event.clientX, event.clientY);
-    if (target) { openDetails(target.event); return; }
+    if (target) {
+      openDetails(target.event, event.clientX, event.clientY);
+      return;
+    }
     if (!detailPanel.hidden) closeDetails();
   }
 
@@ -1473,34 +1489,97 @@
     });
   }
 
-  function openDetails(event) {
-    const wasClosed = detailPanel.hidden;
-    if (wasClosed) {
-      state.detailRestoreView = { start: state.viewStart, end: state.viewEnd };
-    }
+  function defaultDetailAnchor(event) {
+    const rect = viewport.getBoundingClientRect();
+    const width = Math.max(1, rect.width);
+    const eventX = timeToX(event.start, width);
+
+    return {
+      clientX: rect.left + Math.max(24, Math.min(width - 24, eventX)),
+      clientY: rect.top + Math.max(72, Math.min(rect.height - 72, rect.height * state.axisYRatio))
+    };
+  }
+
+  function positionDetailPanel(clientX, clientY) {
+    if (detailPanel.hidden) return;
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const gap = 12;
+    const edge = 12;
+
+    detailPanel.style.left = '0px';
+    detailPanel.style.top = '0px';
+    detailPanel.style.right = 'auto';
+    detailPanel.style.bottom = 'auto';
+
+    requestAnimationFrame(() => {
+      if (detailPanel.hidden) return;
+
+      const panelRect = detailPanel.getBoundingClientRect();
+      const anchorX = clientX - viewportRect.left;
+      const anchorY = clientY - viewportRect.top;
+
+      let left = anchorX + gap;
+      let top = anchorY + gap;
+
+      if (left + panelRect.width > viewportRect.width - edge) {
+        left = anchorX - panelRect.width - gap;
+      }
+
+      if (top + panelRect.height > viewportRect.height - edge) {
+        top = anchorY - panelRect.height - gap;
+      }
+
+      left = Math.max(
+        edge,
+        Math.min(left, viewportRect.width - panelRect.width - edge)
+      );
+
+      top = Math.max(
+        edge,
+        Math.min(top, viewportRect.height - panelRect.height - edge)
+      );
+
+      detailPanel.style.left = `${Math.round(left)}px`;
+      detailPanel.style.top = `${Math.round(top)}px`;
+    });
+  }
+
+  function openDetails(event, clientX = null, clientY = null) {
     state.selectedEvent = event;
+    state.detailRestoreView = null;
+
     state.tooltipPinned = false;
     tooltip.classList.remove('is-pinned');
     tooltip.hidden = true;
     state.tooltipToken++;
+
     state.focusedEvent = null;
+
+    const anchor = Number.isFinite(clientX) && Number.isFinite(clientY)
+      ? { clientX, clientY }
+      : defaultDetailAnchor(event);
+
+    state.detailAnchor = anchor;
+
     detailPanel.style.setProperty('--event-color', event.color || '#5b7cfa');
     detailContent.innerHTML = detailMarkup(event);
     detailPanel.hidden = false;
+
+    positionDetailPanel(anchor.clientX, anchor.clientY);
     scheduleRender();
-    shiftFocusedEventClearOfPanel(event);
   }
 
   function closeDetails() {
     if (detailPanel.hidden) return;
-    const restore = state.detailRestoreView;
+
     state.detailRestoreView = null;
+    state.detailAnchor = null;
     state.selectedEvent = null;
     detailPanel.hidden = true;
 
-    const finish = () => viewport.focus();
-    if (restore) animateViewTo(restore.start, restore.end, 220, finish);
-    else { scheduleRender(); finish(); }
+    scheduleRender();
+    viewport.focus();
   }
 
 
