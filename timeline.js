@@ -26,6 +26,11 @@
   const zoomDial = document.getElementById('zoomDial');
   const zoomRail = document.querySelector('.zoom-rail');
   const themeButtons = [...document.querySelectorAll('.theme-option')];
+  const visualThemeButtons = [...document.querySelectorAll('[data-visual-theme-value]')];
+  const settingsToggle = document.getElementById('settingsToggle');
+  const settingsPanel = document.getElementById('settingsPanel');
+  const settingsBackdrop = document.getElementById('settingsBackdrop');
+  const settingsClose = document.getElementById('settingsClose');
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
   const searchInput = document.getElementById('timelineSearch');
   const searchToggle = document.getElementById('searchToggle');
@@ -78,7 +83,6 @@
     eventLabelZones: [],
     pendingEventYears: [],
     pendingLeaders: [],
-    pendingMarkers: [],
     renderQueued: false,
     hitTargets: [],
     selectedEvent: null,
@@ -103,55 +107,21 @@
   };
 
   const importanceRank = { Major: 3, Medium: 2, Minor: 1 };
-  const LABEL_GAP = 8;
-  const LABEL_LANE_STEP = 30;
-
-  function normalizeSearchText(value) {
-    return String(value || '')
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[‘’'"“”.,:;!?()[\]{}\/_–—-]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  function rectanglesIntersect(a, b, gap = LABEL_GAP) {
-    return a.x1 < b.x2 + gap && a.x2 > b.x1 - gap &&
-      a.y1 < b.y2 + gap && a.y2 > b.y1 - gap;
-  }
-
-  function recordPriority(event) {
-    // Collision geometry must remain stable while hovering or navigating search.
-    // Only persistent record data may influence lane assignment.
-    return (importanceRank[event.importance] || 2) * 10;
-  }
-
-  function findVerticalLabelSlot(box, occupied, axisY, isAbove) {
-    // Every visible record receives a stable lane, even when that lane falls
-    // outside the current viewport. Vertical panning reveals those pre-existing
-    // lanes; labels are never suppressed merely because the screen is crowded.
-    for (let lane = 0; ; lane++) {
-      const top = isAbove
-        ? axisY - 58 - lane * LABEL_LANE_STEP
-        : axisY + 36 + lane * LABEL_LANE_STEP;
-      const candidate = { ...box, y1: top, y2: top + (box.y2 - box.y1), lane };
-      const collidesInLane = occupied.some(other =>
-        other.lane === lane &&
-        candidate.x1 < other.x2 + LABEL_GAP &&
-        candidate.x2 > other.x1 - LABEL_GAP
-      );
-      if (!collidesInLane) return candidate;
-    }
-  }
   const loadedTimelineThumbnails = new Set();
   const failedTimelineThumbnails = new Set();
 
   sheetUrlInput.value = DEFAULT_SHEET_URL;
 
   const savedTheme = localStorage.getItem('timeline-theme') || 'auto';
+  const savedVisualTheme = localStorage.getItem('chrona-visual-theme') || 'gradient';
   applyTheme(savedTheme);
+  applyVisualTheme(savedVisualTheme);
   themeButtons.forEach(button => button.addEventListener('click', () => applyTheme(button.dataset.themeValue)));
+  visualThemeButtons.forEach(button => button.addEventListener('click', () => applyVisualTheme(button.dataset.visualThemeValue)));
+  settingsToggle.addEventListener('click', () => toggleSettings());
+  settingsClose.addEventListener('click', closeSettings);
+  settingsBackdrop.addEventListener('click', closeSettings);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSettings(); });
   systemTheme.addEventListener?.('change', () => {
     if ((localStorage.getItem('timeline-theme') || 'auto') === 'auto') {
       applyTheme('auto', false);
@@ -167,7 +137,6 @@
   document.getElementById('zoomReset').addEventListener('click', resetView);
   zoomDial.addEventListener('pointerdown', event => {
     state.zoomDialActive = true;
-    clearHoverTooltip();
     viewport.classList.add('is-dial-zooming');
     zoomDial.setPointerCapture?.(event.pointerId);
     updateZoomDialFromPointer(event);
@@ -180,8 +149,6 @@
   zoomDial.addEventListener('pointerup', endDialZoom);
   zoomDial.addEventListener('pointercancel', endDialZoom);
   zoomDial.addEventListener('change', endDialZoom);
-  zoomRail?.addEventListener('pointerenter', clearHoverTooltip);
-  zoomRail?.addEventListener('pointermove', clearHoverTooltip);
   primaryCategorySelect.addEventListener('change', () => {
     state.primaryCategory = primaryCategorySelect.value || null;
     scheduleRender();
@@ -196,25 +163,11 @@
   viewport.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('pointerup', onGlobalPointerEnd);
   window.addEventListener('pointercancel', onGlobalPointerEnd);
-  viewport.addEventListener('lostpointercapture', clearPointerInteraction);
-  window.addEventListener('blur', resetTransientInteractionState);
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) resetTransientInteractionState();
-  });
   viewport.addEventListener('pointerleave', onPointerLeave);
   viewport.addEventListener('mousemove', onHoverMove);
-  tooltip.addEventListener('mouseenter', () => {
-    // Keep the current tooltip open while the pointer is over interactive content.
-    state.tooltipPinned = true;
-  });
-  tooltip.addEventListener('mouseleave', () => {
-    state.tooltipPinned = false;
-    tooltip.classList.remove('is-pinned');
-    tooltip.hidden = true;
-    state.tooltipToken++;
-    setHoveredRecord(null);
-  });
-  tooltip.addEventListener('click', event => event.stopPropagation());
+  tooltip.addEventListener('mouseenter', () => { state.tooltipPinned = true; });
+  tooltip.addEventListener('mouseleave', () => { if (!state.tooltipPinned) tooltip.hidden = true; });
+  tooltip.addEventListener('click', event => { event.stopPropagation(); state.tooltipPinned = !state.tooltipPinned; tooltip.classList.toggle('is-pinned', state.tooltipPinned); });
   window.addEventListener('resize', () => {
     scheduleRender();
     if (!detailPanel.hidden && state.detailAnchor) {
@@ -258,11 +211,6 @@
     if (event.key === 'Enter') {
       event.preventDefault();
       moveToSearchResult(event.shiftKey ? -1 : 1);
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      searchControl.classList.remove('is-open');
-      searchToggle.setAttribute('aria-expanded', 'false');
-      searchInput.blur();
     }
   });
   searchPrevious.addEventListener('click', event => {
@@ -291,6 +239,35 @@
     themeButtons.forEach(button => button.classList.toggle('is-active', button.dataset.themeValue === normalized));
     if (persist) localStorage.setItem('timeline-theme', normalized);
     scheduleRender();
+  }
+
+
+  function applyVisualTheme(mode, persist = true) {
+    const normalized = mode === 'flat' ? 'flat' : 'gradient';
+    document.documentElement.dataset.visualTheme = normalized;
+    visualThemeButtons.forEach(button => {
+      const active = button.dataset.visualThemeValue === normalized;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-checked', String(active));
+    });
+    if (persist) localStorage.setItem('chrona-visual-theme', normalized);
+    scheduleRender();
+  }
+
+  function toggleSettings(forceOpen) {
+    const opening = typeof forceOpen === 'boolean' ? forceOpen : settingsPanel.hidden;
+    settingsPanel.hidden = !opening;
+    settingsBackdrop.hidden = !opening;
+    settingsToggle.classList.toggle('is-active', opening);
+    settingsToggle.setAttribute('aria-expanded', String(opening));
+    settingsToggle.setAttribute('aria-label', opening ? 'Close settings' : 'Open settings');
+    if (opening) requestAnimationFrame(() => settingsClose.focus());
+  }
+
+  function closeSettings() {
+    if (settingsPanel.hidden) return;
+    toggleSettings(false);
+    settingsToggle.focus();
   }
 
   function cssVar(name, fallback) {
@@ -814,15 +791,6 @@
     }
   }
 
-  function resetTransientInteractionState() {
-    clearPointerInteraction();
-    state.tooltipPinned = false;
-    tooltip.classList.remove('is-pinned');
-    tooltip.hidden = true;
-    state.tooltipToken++;
-    setHoveredRecord(null);
-  }
-
   function clearPointerInteraction() {
     state.pointerMap.clear();
     state.dragStartX = null;
@@ -861,65 +829,27 @@
     }
   }
 
-  function setHoveredRecord(event) {
-    const nextId = event?.id || null;
-    if ((state.hoveredEvent?.id || null) === nextId) return;
-    // Hover is tooltip/cursor state only. It must not redraw, dim, resize, or
-    // otherwise repaint the timeline scene.
-    state.hoveredEvent = event || null;
-  }
-
   function onPointerLeave() {
     state.cursorX = null;
     state.cursorYear = null;
     yearCursor.hidden = true;
-    if (!state.tooltipPinned) setHoveredRecord(null);
     scheduleRender();
     if (!state.tooltipPinned) { tooltip.hidden = true; state.tooltipToken++; }
   }
 
-  function isOverTimelineControl(event) {
-    if (state.zoomDialActive) return true;
-    if (event.target.closest?.('.zoom-rail')) return true;
-    const railRect = zoomRail?.getBoundingClientRect();
-    return Boolean(railRect &&
-      event.clientX >= railRect.left && event.clientX <= railRect.right &&
-      event.clientY >= railRect.top && event.clientY <= railRect.bottom);
-  }
-
-  function clearHoverTooltip() {
-    state.tooltipPinned = false;
-    tooltip.classList.remove('is-pinned');
-    tooltip.hidden = true;
-    state.tooltipToken++;
-    setHoveredRecord(null);
-  }
-
   function onHoverMove(event) {
     updateYearCursor(event);
-    if (isOverTimelineControl(event)) {
-      clearHoverTooltip();
-      return;
-    }
-    if (state.tooltipPinned && !tooltip.matches(':hover')) state.tooltipPinned = false;
-    if (state.pointerMap.size) {
-      tooltip.hidden = true;
-      state.tooltipToken++;
-      return;
-    }
-    if (state.tooltipPinned) return;
+    if (state.pointerMap.size || state.tooltipPinned) { tooltip.hidden = true; state.tooltipToken++; return; }
     const rect = viewport.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     const target = [...state.hitTargets].reverse().find(t => x >= t.x1 && x <= t.x2 && y >= t.y1 && y <= t.y2);
     if (!target) {
-      setHoveredRecord(null);
       tooltip.hidden = true;
       state.tooltipToken++;
       return;
     }
 
-    setHoveredRecord(target.event);
     const token = ++state.tooltipToken;
     const mediaLink = target.event.media
       ? `<div class="media-link"><a href="${escapeAttribute(mediaDestinationUrl(target.event.media))}" target="_blank" rel="noopener noreferrer">Open media ↗</a><div class="media-url">${escapeHtml(target.event.media)}</div></div>`
@@ -1003,7 +933,6 @@
     state.eventLabelZones = [];
     state.pendingEventYears = [];
     state.pendingLeaders = [];
-    state.pendingMarkers = [];
 
     const axisY = rect.height * state.axisYRatio;
     drawBackground(rect.width, rect.height);
@@ -1164,40 +1093,26 @@
   }
 
   // Point events and long-running era blocks are both timeline records.
+  // Search must treat them identically.
   function searchTextForEvent(event) {
     const end = Number.isFinite(event.end) ? event.end : event.start;
-    return normalizeSearchText([
-      event.headline, event.category, event.text, event.displayDate,
-      formatYear(event.start), formatYear(end),
-      `${formatYear(event.start)} ${formatYear(end)}`,
-      event.importance, event.elementType, event.id
-    ].filter(Boolean).join(' '));
-  }
 
-  function rankSearchRecord(event, query = state.searchQuery) {
-    const q = normalizeSearchText(query);
-    if (!q) return null;
-    const headline = normalizeSearchText(event.headline);
-    const category = normalizeSearchText(event.category);
-    const body = normalizeSearchText(event.text);
-    const displayDate = normalizeSearchText(event.displayDate);
-    const startYear = normalizeSearchText(formatYear(event.start));
-    const endYear = normalizeSearchText(formatYear(Number.isFinite(event.end) ? event.end : event.start));
-    const metadata = normalizeSearchText([event.importance, event.elementType, event.id].join(' '));
-    if (headline === q) return 0;
-    if (headline.startsWith(q)) return 10;
-    if (headline.includes(q)) return 20;
-    if (startYear === q || endYear === q) return 30;
-    if (category === q) return 40;
-    if (category.startsWith(q)) return 50;
-    if (body.includes(q)) return 60;
-    if (displayDate.includes(q)) return 70;
-    if (metadata.includes(q) || searchTextForEvent(event).includes(q)) return 80;
-    return null;
+    return [
+      event.headline,
+      event.category,
+      event.text,
+      event.displayDate,
+      formatYear(event.start),
+      formatYear(end),
+      `${formatYear(event.start)}–${formatYear(end)}`,
+      event.importance,
+      event.elementType
+    ].filter(Boolean).join(' ').toLowerCase();
   }
 
   function eventMatchesSearch(event, query = state.searchQuery) {
-    return !normalizeSearchText(query) || rankSearchRecord(event, query) != null;
+    const normalized = String(query || '').trim().toLowerCase();
+    return !normalized || searchTextForEvent(event).includes(normalized);
   }
 
   function isEraBlock(event) {
@@ -1206,10 +1121,21 @@
 
   function drawEvents(width, height, axisY) {
     const q = state.searchQuery.trim().toLowerCase();
-    // Keep every enabled record in the layout at all times. The viewport clips
-    // offscreen content naturally; horizontal pan bounds control navigation.
-    // This also keeps lane assignments stable while panning near either edge.
-    const visible = state.events.filter(e => state.enabledCategories.has(e.category));
+    // Keep point labels alive until the complete rendered label has left the
+    // viewport. Culling by the event anchor caused long labels to disappear
+    // abruptly as soon as their dot crossed an edge. A 420 px time overscan is
+    // larger than the maximum event-label width and is recomputed at every zoom.
+    const timePerPixel = (state.viewEnd - state.viewStart) / Math.max(1, width);
+    const labelOverscanYears = timePerPixel * 420;
+    const visible = state.events.filter(e => {
+      if (!state.enabledCategories.has(e.category)) return false;
+      if (e.elementType === 'Period') {
+        return e.start <= state.viewEnd && (e.end ?? e.start) >= state.viewStart;
+      }
+      const hasRange = Number.isFinite(e.end) && e.end > e.start;
+      const anchor = e.start;
+      return anchor >= state.viewStart - labelOverscanYears && anchor <= state.viewEnd + labelOverscanYears;
+    });
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
     const above = visible.filter(e => e.category === state.primaryCategory);
     const below = visible.filter(e => e.category !== state.primaryCategory);
@@ -1229,10 +1155,6 @@
     // so passing connectors never appear attached to an unrelated era block.
     drawPeriodRows(abovePeriods, width, height, axisY, threshold, true, abovePointLanes);
     drawPeriodRows(belowPeriods, width, height, axisY, threshold, false, belowPointLanes);
-
-    // Markers and hover/focus rings are the final canvas pass so duration and
-    // period bars can never cover them.
-    drawTopMarkers();
   }
 
   function resolvePosition(event) {
@@ -1241,10 +1163,8 @@
   }
 
   function drawPointRows(events, width, axisY, isAbove, threshold) {
-    const sorted = [...events].sort((a, b) =>
-      recordPriority(b) - recordPriority(a) || a.start - b.start || String(a.id).localeCompare(String(b.id))
-    );
-    const occupiedLabels = [];
+    const sorted = [...events].sort((a, b) => a.start - b.start || (importanceRank[b.importance] - importanceRank[a.importance]));
+    const laneEnds = [];
     let maxLabelLane = -1;
 
     // Allocate compact micro-lanes for touching or overlapping duration spans.
@@ -1265,6 +1185,9 @@
       const x = timeToX(anchorTime, width);
       const startX = x;
       const endX = hasRange ? timeToX(event.end, width) : startX;
+      const visibleRangeLeft = Math.min(startX, endX);
+      const visibleRangeRight = Math.max(startX, endX);
+      if (visibleRangeRight < -40 || visibleRangeLeft > width + 40) return;
       const showLabel = (importanceRank[event.importance] || 2) >= threshold;
       ctx.save();
       ctx.font = `${event.importance === 'Major' ? '650' : '520'} 13px -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif`;
@@ -1272,28 +1195,52 @@
       const thumbnailAllowance = timelinePreview ? 33 : 0;
       const measuredLabelWidth = Math.ceil(ctx.measureText(event.headline).width + 20 + thumbnailAllowance);
       ctx.restore();
-      // Labels always begin at the true event marker and always remain in the
-      // layout. The label layer clips any portion outside the viewport.
-      const labelWidth = Math.min(360, Math.max(96, measuredLabelWidth));
+      const edgePadding = 8;
+
+      // The zoom rail overlays the right side of the timeline. Treat the area
+      // beneath it as unavailable so labels remain fully readable when zoomed out.
+      const viewportRect = viewport.getBoundingClientRect();
+      const zoomRailRect = zoomRail?.getBoundingClientRect();
+      const zoomRailLeft = zoomRailRect
+        ? zoomRailRect.left - viewportRect.left
+        : width;
+
+      const usableRight = Math.max(
+        edgePadding + 96,
+        Math.min(width - edgePadding, zoomRailLeft - 10)
+      );
+      const usableWidth = Math.max(96, usableRight - edgePadding);
+
+      // Labels may shift to remain readable near an edge, but they must not
+      // remain pinned onscreen after their actual event marker has left view.
+      if (x < edgePadding || x > usableRight) return;
+
+      const labelWidth = Math.min(
+        360,
+        Math.max(96, Math.min(measuredLabelWidth, usableWidth))
+      );
+
+      // A point-event label always begins at its true event marker. Never move
+      // it left of the vertical event line. If the full label cannot fit in the
+      // usable viewport, omit it until the user pans it back into view.
       const labelLeft = x - 1;
       const labelRight = labelLeft + labelWidth;
 
-      const labelHeight = 27;
-      let placement = null;
+      if (labelLeft < edgePadding || labelRight > usableRight) return;
+
+      let lane = 0;
       if (showLabel) {
-        placement = findVerticalLabelSlot(
-          { x1: labelLeft, x2: labelRight, y1: 0, y2: labelHeight, ownerId: event.id },
-          occupiedLabels,
-          axisY,
-          isAbove
-        );
-        if (placement) {
-          occupiedLabels.push(placement);
-          maxLabelLane = Math.max(maxLabelLane, placement.lane);
-        }
+        while (
+          laneEnds[lane] != null &&
+          labelLeft < laneEnds[lane] + 8
+        ) lane++;
+        laneEnds[lane] = labelRight;
+        maxLabelLane = Math.max(maxLabelLane, lane);
       }
-      const lane = placement?.lane || 0;
-      const labelTop = placement?.y1 ?? (isAbove ? axisY - 58 : axisY + 36);
+
+      const labelHeight = 27;
+      const laneGap = 34;
+      const labelTop = isAbove ? axisY - 58 - lane * laneGap : axisY + 36 + lane * laneGap;
       // Enter the owning label by two pixels so the connector cannot appear to
       // stop short at a rounded edge. Duration spans stack outward toward their lane.
       const leaderEndY = isAbove ? labelTop + labelHeight - 2 : labelTop + 2;
@@ -1305,15 +1252,13 @@
       const spanOffset = hasRange ? 3 + microLane * 4 : 0;
       const spanY = hasRange ? axisY + (isAbove ? -spanOffset : spanOffset) : axisY;
 
-      if (placement) {
-        state.pendingLeaders.push({
-          event,
-          x: leaderX,
-          y1: spanY,
-          y2: leaderEndY,
-          ownerId: event.id
-        });
-      }
+      state.pendingLeaders.push({
+        event,
+        x: leaderX,
+        y1: spanY,
+        y2: leaderEndY,
+        ownerId: event.id
+      });
 
       // A ranged event uses a 3 px category-colored span beginning at its
       // exact start date. Touching or overlapping spans occupy separate micro-lanes.
@@ -1346,7 +1291,48 @@
         }
       }
 
-      state.pendingMarkers.push({ event, x: leaderX, y: spanY });
+      ctx.save();
+
+      const hasSearch = Boolean(state.searchQuery.trim());
+      const isSearchMatch = eventMatchesSearch(event);
+      ctx.globalAlpha = hasSearch && !isSearchMatch ? 0.22 : 1;
+
+      const isSelected = state.selectedEvent?.id === event.id;
+
+      if (isSelected) {
+        // A light separation ring keeps the selected marker visible against
+        // the axis, event spans, and either theme.
+        ctx.beginPath();
+        ctx.arc(leaderX, spanY, 9.5, 0, Math.PI * 2);
+        ctx.strokeStyle = cssVar('--surface-solid', '#ffffff');
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(leaderX, spanY, 8, 0, Math.PI * 2);
+        ctx.strokeStyle = event.color;
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = colorWithAlpha(event.color, .48);
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = event.color;
+      ctx.shadowColor = colorWithAlpha(event.color, isSelected ? .45 : .24);
+      ctx.shadowBlur = isSelected
+        ? 10
+        : (event.importance === 'Major' ? 8 : 5);
+
+      ctx.beginPath();
+      ctx.arc(
+        leaderX,
+        spanY,
+        isSelected ? 5.6 : (event.importance === 'Major' ? 4.6 : 3.35),
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.restore();
       state.hitTargets.push({ event, x1: leaderX - 10, x2: leaderX + 10, y1: spanY - 10, y2: spanY + 10 });
       state.hitTargets.push({ event, x1: leaderX - 5, x2: leaderX + 5, y1: Math.min(spanY, leaderEndY), y2: Math.max(spanY, leaderEndY) });
 
@@ -1375,7 +1361,7 @@
         });
       }
 
-      if (showLabel && placement) {
+      if (showLabel) {
         const label = document.createElement('div');
         label.className = `event-label ${event.importance.toLowerCase()} ${isAbove ? 'event-label-above' : 'event-label-below'}`;
 
@@ -1411,7 +1397,6 @@
         label.appendChild(labelText);
         label.dataset.eventId = event.id;
         if (state.selectedEvent?.id === event.id) label.classList.add('is-selected');
-        if (state.hoveredEvent?.id === event.id) label.classList.add('is-focused');
         label.style.left = `${labelLeft}px`;
         label.style.top = `${labelTop}px`;
         label.style.setProperty('--event-color', event.color);
@@ -1439,50 +1424,6 @@
     return maxLabelLane + 1;
   }
 
-
-  function drawTopMarkers() {
-    for (const marker of state.pendingMarkers) {
-      const { event, x, y } = marker;
-      const hasSearch = Boolean(state.searchQuery.trim());
-      const isSearchMatch = eventMatchesSearch(event);
-      const isSelected = state.selectedEvent?.id === event.id;
-      const isHovered = state.hoveredEvent?.id === event.id;
-
-      ctx.save();
-      ctx.globalAlpha = hasSearch && !isSearchMatch ? 0.22 : 1;
-
-      if (isSelected || isHovered) {
-        ctx.beginPath();
-        ctx.arc(x, y, 9.5, 0, Math.PI * 2);
-        ctx.strokeStyle = cssVar('--surface-solid', '#ffffff');
-        ctx.lineWidth = 4;
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(x, y, 8, 0, Math.PI * 2);
-        ctx.strokeStyle = event.color;
-        ctx.lineWidth = 2.5;
-        ctx.shadowColor = colorWithAlpha(event.color, .48);
-        ctx.shadowBlur = 10;
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = event.color;
-      ctx.shadowColor = colorWithAlpha(event.color, (isSelected || isHovered) ? .5 : .24);
-      ctx.shadowBlur = isSelected ? 10 : (event.importance === 'Major' ? 8 : 5);
-      ctx.beginPath();
-      ctx.arc(
-        x,
-        y,
-        (isSelected || isHovered) ? 5.8 : (event.importance === 'Major' ? 4.6 : 3.35),
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-
   function mixHex(colorA, colorB, amount) {
     const parse = value => {
       const hex = String(value || '').trim().replace('#', '');
@@ -1496,13 +1437,11 @@
   }
 
   function drawPeriodRows(periods, width, height, axisY, threshold, isAbove, pointLaneCount = 0) {
-    const sorted = [...periods].sort((a, b) =>
-      recordPriority(b) - recordPriority(a) || a.start - b.start || (b.end - b.start) - (a.end - a.start)
-    );
+    const sorted = [...periods].sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
     const laneEnds = [];
     const layout = [];
-    const baseBarHeight = 24;
-    const laneGap = 34;
+    const barHeight = 28;
+    const laneGap = 36;
     const pointLabelHeight = 27;
     const pointLaneGap = 34;
     const separation = 12;
@@ -1512,7 +1451,7 @@
       const x2 = timeToX(event.end, width);
       const left = Math.min(x1, x2);
       const right = Math.max(x1, x2);
-      if (right <= left) continue;
+      if (right <= 0 || left >= width || right <= left) continue;
       let lane = 0;
       while (laneEnds[lane] != null && left < laneEnds[lane] + 8) lane++;
       laneEnds[lane] = right;
@@ -1527,15 +1466,18 @@
       ? axisY + 36 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight
       : axisY;
     let firstPeriodY = isAbove
-      ? Math.min(axisY - 112, outermostPointTop - separation - 30)
+      ? Math.min(axisY - 112, outermostPointTop - separation - barHeight)
       : Math.max(axisY + 92, outermostPointBottom + separation);
 
     // Era rows remain anchored to the timeline axis. They may naturally move
     // out of the clipped viewport when the user drags the timeline vertically.
 
     for (const { event, left, right, lane } of layout) {
-      const barHeight = baseBarHeight + (event.importance === 'Major' ? 6 : event.importance === 'Medium' ? 3 : 0);
       const y = isAbove ? firstPeriodY - lane * laneGap : firstPeriodY + lane * laneGap;
+      // Canvas clips automatically, but the DOM label layer previously left a
+      // faint, partially clipped duplicate at the top edge. Do not create any
+      // period block or text when its complete row is outside the viewport.
+      if (y + barHeight <= 0 || y >= height) continue;
       const periodFill = event.color;
       const periodWidth = Math.max(2, right - left);
       const periodRadius = Math.min(10, barHeight / 2, periodWidth / 2);
@@ -1543,19 +1485,19 @@
       // cleanly occludes any unrelated connector without a square background mask.
 
       ctx.save();
-      const hasSearch = Boolean(state.searchQuery.trim());
-      const isSearchMatch = eventMatchesSearch(event);
-      const isHovered = state.hoveredEvent?.id === event.id;
-      ctx.globalAlpha = hasSearch && !isSearchMatch ? (isHovered ? 0.55 : 0.22) : 1;
-      if (isHovered) {
-        ctx.shadowColor = colorWithAlpha(event.color, .55);
-        ctx.shadowBlur = 12;
+      ctx.globalAlpha = 1;
+      const flatVisualTheme = document.documentElement.dataset.visualTheme === 'flat';
+      if (flatVisualTheme) {
+        ctx.fillStyle = mixHex(periodFill, document.documentElement.dataset.theme === 'dark' ? '#101214' : '#ffffff', 0.18);
+        ctx.strokeStyle = mixHex(periodFill, document.documentElement.dataset.theme === 'dark' ? '#ffffff' : '#08111f', 0.74);
+        ctx.lineWidth = 1.5;
+      } else {
+        const periodGradient = ctx.createLinearGradient(left, 0, right, 0);
+        periodGradient.addColorStop(0, mixHex(periodFill, '#08111f', 0.76));
+        periodGradient.addColorStop(0.58, periodFill);
+        periodGradient.addColorStop(1, mixHex(periodFill, '#ffffff', 0.58));
+        ctx.fillStyle = periodGradient;
       }
-      const periodGradient = ctx.createLinearGradient(left, 0, right, 0);
-      periodGradient.addColorStop(0, mixHex(periodFill, '#08111f', 0.76));
-      periodGradient.addColorStop(0.58, periodFill);
-      periodGradient.addColorStop(1, mixHex(periodFill, '#ffffff', 0.58));
-      ctx.fillStyle = periodGradient;
       ctx.beginPath();
       if (typeof ctx.roundRect === 'function') {
         ctx.roundRect(left, y, periodWidth, barHeight, periodRadius);
@@ -1563,6 +1505,7 @@
         ctx.rect(left, y, periodWidth, barHeight);
       }
       ctx.fill();
+      if (flatVisualTheme) ctx.stroke();
       state.hitTargets.push({ event, x1: Math.max(0, left), x2: Math.min(width, right), y1: y, y2: y + barHeight });
       ctx.restore();
 
@@ -1588,10 +1531,12 @@
         ctx.clip();
         ctx.font = '590 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = 'rgba(0,0,0,.28)';
-        ctx.shadowBlur = 1;
-        ctx.shadowOffsetY = 1;
+        ctx.fillStyle = flatVisualTheme
+          ? mixHex(periodFill, document.documentElement.dataset.theme === 'dark' ? '#ffffff' : '#08111f', 0.78)
+          : '#ffffff';
+        ctx.shadowColor = flatVisualTheme ? 'transparent' : 'rgba(0,0,0,.28)';
+        ctx.shadowBlur = flatVisualTheme ? 0 : 1;
+        ctx.shadowOffsetY = flatVisualTheme ? 0 : 1;
 
         let renderedText = fullText;
         const fullTextWidth = ctx.measureText(fullText).width;
@@ -1652,12 +1597,8 @@
       }
 
       ctx.save();
-      const isHovered = state.hoveredEvent?.id === leader.event.id;
-      const hasSearch = Boolean(state.searchQuery.trim());
-      const isSearchMatch = eventMatchesSearch(leader.event);
-      ctx.globalAlpha = hasSearch && !isSearchMatch ? (isHovered ? .55 : .22) : 1;
       ctx.strokeStyle = colorWithAlpha(leader.event.color, 1);
-      ctx.lineWidth = isHovered ? 3 : 2;
+      ctx.lineWidth = 2;
       ctx.lineCap = 'butt';
 
       for (const [a, b] of segments) {
@@ -1881,10 +1822,11 @@
 
     state.searchMatches = query
       ? state.events
-          .map(event => ({ event, rank: state.enabledCategories.has(event.category) ? rankSearchRecord(event, query) : null }))
-          .filter(item => item.rank != null)
-          .sort((a, b) => a.rank - b.rank || a.event.start - b.event.start || String(a.event.id).localeCompare(String(b.event.id)))
-          .map(item => item.event)
+          .filter(event =>
+            state.enabledCategories.has(event.category) &&
+            eventMatchesSearch(event, query)
+          )
+          .sort((a, b) => a.start - b.start)
       : [];
 
     if (!state.searchMatches.length) {
@@ -1964,49 +1906,19 @@
   }
 
   function onTimelineKeyDown(event) {
-    const tag = event.target?.tagName?.toLowerCase();
-    const typing = ['input', 'textarea', 'select'].includes(tag) || event.target?.isContentEditable;
-    if (typing && event.target !== searchInput) return;
-
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      state.tooltipPinned = false;
-      tooltip.classList.remove('is-pinned');
-      tooltip.hidden = true;
-      setHoveredRecord(null);
-      if (searchControl.classList.contains('is-open')) {
-        searchControl.classList.remove('is-open');
-        searchToggle.setAttribute('aria-expanded', 'false');
-        searchInput.blur();
-      }
-      return;
-    }
-
-    if (state.searchQuery.trim() && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-      event.preventDefault();
-      moveToSearchResult(event.key === 'ArrowLeft' ? -1 : 1);
-      return;
-    }
-
+    if (event.key === 'Escape' && !detailPanel.hidden) { closeDetails(); return; }
+    if (!['ArrowLeft','ArrowRight','Enter'].includes(event.key)) return;
+    const candidates = state.events.filter(e => state.enabledCategories.has(e.category)).sort((a,b) => a.start-b.start);
+    if (!candidates.length) return;
+    let index = state.selectedEvent ? candidates.findIndex(e => e.id === state.selectedEvent.id) : -1;
+    if (event.key === 'ArrowRight') index = Math.min(candidates.length - 1, index + 1);
+    if (event.key === 'ArrowLeft') index = Math.max(0, index < 0 ? 0 : index - 1);
+    if (event.key === 'Enter' && state.selectedEvent) { openDetails(state.selectedEvent); return; }
+    state.selectedEvent = candidates[index];
+    const center = state.selectedEvent.start;
     const span = state.viewEnd - state.viewStart;
-    const enabled = state.events.filter(e => state.enabledCategories.has(e.category));
-    if (!enabled.length) return;
-    const first = Math.min(...enabled.map(e => e.start));
-    const last = Math.max(...enabled.map(e => Number.isFinite(e.end) ? e.end : e.start));
-    let start = state.viewStart;
-    let end = state.viewEnd;
-
-    if (event.key === 'Home') { start = first; end = first + span; }
-    else if (event.key === 'End') { end = last; start = last - span; }
-    else if (event.key === 'PageUp') { start -= span * .8; end -= span * .8; }
-    else if (event.key === 'PageDown') { start += span * .8; end += span * .8; }
-    else if (event.key === 'ArrowLeft') { start -= span * .12; end -= span * .12; }
-    else if (event.key === 'ArrowRight') { start += span * .12; end += span * .12; }
-    else return;
-
-    event.preventDefault();
-    clampView(start, end);
-    state.selectedEvent = null;
+    state.viewStart = center - span / 2;
+    state.viewEnd = center + span / 2;
     scheduleRender();
   }
 
