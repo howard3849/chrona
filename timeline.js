@@ -10,13 +10,14 @@
   const MIN_VISIBLE_YEARS = 0.08;
   const MAX_VISIBLE_YEARS = 12000;
 
-  // Detail-panel code remains available, but opening it is temporarily disabled.
-  const DETAILS_ENABLED = false;
+  const DETAILS_ENABLED = true;
 
   const canvas = document.getElementById('timelineCanvas');
   const ctx = canvas.getContext('2d');
   const viewport = document.getElementById('timelineViewport');
   const labelLayer = document.getElementById('labelLayer');
+  const leaderCanvas = document.getElementById('leaderCanvas');
+  const leaderCtx = leaderCanvas.getContext('2d');
   const tooltip = document.getElementById('tooltip');
   const statusEl = document.getElementById('status');
   const filtersEl = document.getElementById('categoryFilters');
@@ -149,6 +150,17 @@
   zoomDial.addEventListener('pointerup', endDialZoom);
   zoomDial.addEventListener('pointercancel', endDialZoom);
   zoomDial.addEventListener('change', endDialZoom);
+
+  const hideYearCursor = () => {
+    if (state.cursorX == null && yearCursor.hidden) return;
+    state.cursorX = null;
+    state.cursorYear = null;
+    yearCursor.hidden = true;
+    scheduleRender();
+  };
+  zoomRail?.addEventListener('pointerenter', hideYearCursor);
+  zoomRail?.addEventListener('pointermove', hideYearCursor);
+  zoomRail?.addEventListener('pointerdown', hideYearCursor);
   primaryCategorySelect.addEventListener('change', () => {
     state.primaryCategory = primaryCategorySelect.value || null;
     scheduleRender();
@@ -158,16 +170,17 @@
   viewport.addEventListener('pointerdown', onPointerDown);
   detailPanel.addEventListener('pointerdown', event => event.stopPropagation());
   detailPanel.addEventListener('click', event => event.stopPropagation());
+  document.addEventListener('pointerdown', event => {
+    if (!detailPanel.hidden && !detailPanel.contains(event.target)) closeDetails();
+  }, true);
   viewport.addEventListener('pointermove', onPointerMove);
   viewport.addEventListener('pointerup', onPointerUp);
   viewport.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('pointerup', onGlobalPointerEnd);
   window.addEventListener('pointercancel', onGlobalPointerEnd);
   viewport.addEventListener('pointerleave', onPointerLeave);
-  viewport.addEventListener('mousemove', onHoverMove);
-  tooltip.addEventListener('mouseenter', () => { state.tooltipPinned = true; });
-  tooltip.addEventListener('mouseleave', () => { if (!state.tooltipPinned) tooltip.hidden = true; });
-  tooltip.addEventListener('click', event => { event.stopPropagation(); state.tooltipPinned = !state.tooltipPinned; tooltip.classList.toggle('is-pinned', state.tooltipPinned); });
+  // Hover is intentionally inert. Event details open only on click.
+  tooltip.hidden = true;
   window.addEventListener('resize', () => {
     scheduleRender();
     if (!detailPanel.hidden && state.detailAnchor) {
@@ -243,7 +256,7 @@
 
 
   function applyVisualTheme(mode, persist = true) {
-    const normalized = mode === 'flat' ? 'flat' : 'gradient';
+    const normalized = ['gradient', 'flat', 'metro'].includes(mode) ? mode : 'gradient';
     document.documentElement.dataset.visualTheme = normalized;
     visualThemeButtons.forEach(button => {
       const active = button.dataset.visualThemeValue === normalized;
@@ -638,8 +651,7 @@
 
   function resetView() {
     // Reset can be invoked immediately after a drag or captured pointer sequence.
-    // Clear all interaction state so a missed pointerup cannot suppress hover
-    // tooltips until the next click.
+    // Clear all interaction state after reset.
     clearPointerInteraction();
     state.tooltipPinned = false;
     tooltip.classList.remove('is-pinned');
@@ -732,14 +744,33 @@
     event.preventDefault();
     const rect = viewport.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+
+    // Trackpad pinch (reported by browsers as Ctrl/Meta + wheel) remains zoom.
     if (event.ctrlKey || event.metaKey) {
       zoomAt(ratio, Math.exp(event.deltaY * 0.006));
-    } else {
-      const shift = (state.viewEnd - state.viewStart) * (event.deltaX + event.deltaY) / rect.width;
-      state.viewStart += shift;
-      state.viewEnd += shift;
-      scheduleRender();
+      return;
     }
+
+    // Two-finger horizontal movement pans through time. A conventional mouse
+    // wheel with Shift held is treated as horizontal movement as well.
+    const horizontalDelta = event.deltaX || (event.shiftKey ? event.deltaY : 0);
+    if (horizontalDelta) {
+      const span = state.viewEnd - state.viewStart;
+      const shift = span * horizontalDelta / Math.max(1, rect.width);
+      clampView(state.viewStart + shift, state.viewEnd + shift);
+    }
+
+    // Two-finger vertical movement moves the entire timeline up/down, matching
+    // the existing click-and-drag vertical navigation.
+    if (!event.shiftKey && event.deltaY) {
+      state.axisYRatio = Math.max(
+        0.22,
+        Math.min(0.76, state.axisYRatio - event.deltaY / Math.max(1, rect.height))
+      );
+      localStorage.setItem('chrona-axis-y-ratio', String(state.axisYRatio));
+    }
+
+    scheduleRender();
   }
 
   function onPointerDown(event) {
@@ -769,7 +800,11 @@
   }
 
   function onPointerMove(event) {
-    if (!state.pointerMap.has(event.pointerId)) return;
+    if (!state.pointerMap.has(event.pointerId)) {
+      updateYearCursor(event);
+      return;
+    }
+    hideYearCursor();
     state.pointerMap.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (state.pointerMap.size === 2) {
       const [a, b] = [...state.pointerMap.values()];
@@ -837,50 +872,8 @@
     if (!state.tooltipPinned) { tooltip.hidden = true; state.tooltipToken++; }
   }
 
-  function onHoverMove(event) {
-    updateYearCursor(event);
-    if (state.pointerMap.size || state.tooltipPinned) { tooltip.hidden = true; state.tooltipToken++; return; }
-    const rect = viewport.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const target = [...state.hitTargets].reverse().find(t => x >= t.x1 && x <= t.x2 && y >= t.y1 && y <= t.y2);
-    if (!target) {
-      tooltip.hidden = true;
-      state.tooltipToken++;
-      return;
-    }
-
-    const token = ++state.tooltipToken;
-    const mediaLink = target.event.media
-      ? `<div class="media-link"><a href="${escapeAttribute(mediaDestinationUrl(target.event.media))}" target="_blank" rel="noopener noreferrer">Open media ↗</a><div class="media-url">${escapeHtml(target.event.media)}</div></div>`
-      : '';
-    const mediaCaption = target.event.mediaCaption ? `<div class="media-caption">${escapeHtml(target.event.mediaCaption)}</div>` : '';
-    const mediaCredit = target.event.mediaCredit ? `<div class="media-credit">${escapeHtml(target.event.mediaCredit)}</div>` : '';
-    const body = target.event.text
-      ? `<div class="body">${escapeHtml(target.event.text)}</div>`
-      : `<div class="body empty">No additional worksheet text for this record.</div>`;
-
-    tooltip.style.setProperty('--event-color', target.event.color || '#5b7cfa');
-    tooltip.innerHTML = `<strong>${escapeHtml(target.event.headline)}</strong><div class="date">${escapeHtml(target.event.displayDate || formatYear(target.event.start))}</div><div class="tooltip-image-slot" hidden></div>${body}${mediaCaption}${mediaCredit}${mediaLink}`;
-    tooltip.hidden = false;
-    positionTooltip(event.clientX, event.clientY);
-
-    const previewUrl = target.event.thumbnail || (looksLikeImage(target.event.media) ? target.event.media : '');
-    if (previewUrl) {
-      const image = new Image();
-      image.alt = target.event.mediaCaption || target.event.headline;
-      image.className = 'tooltip-thumbnail';
-      image.onload = () => {
-        if (token !== state.tooltipToken || tooltip.hidden) return;
-        const slot = tooltip.querySelector('.tooltip-image-slot');
-        if (!slot) return;
-        slot.replaceChildren(image);
-        slot.hidden = false;
-        positionTooltip(event.clientX, event.clientY);
-      };
-      image.onerror = () => {};
-      image.src = previewUrl;
-    }
+  function onHoverMove() {
+    // Intentionally empty: Chrona has no hover interaction.
   }
 
   function positionTooltip(clientX, clientY) {
@@ -925,8 +918,12 @@
     state.dpr = Math.max(1, window.devicePixelRatio || 1);
     canvas.width = Math.round(rect.width * state.dpr);
     canvas.height = Math.round(rect.height * state.dpr);
+    leaderCanvas.width = Math.round(rect.width * state.dpr);
+    leaderCanvas.height = Math.round(rect.height * state.dpr);
     ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    leaderCtx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
     ctx.clearRect(0, 0, rect.width, rect.height);
+    leaderCtx.clearRect(0, 0, rect.width, rect.height);
     labelLayer.replaceChildren();
     state.hitTargets = [];
     state.eventYearZones = [];
@@ -1220,10 +1217,18 @@
         Math.max(96, Math.min(measuredLabelWidth, usableWidth))
       );
 
-      // A point-event label always begins at its true event marker. Never move
-      // it left of the vertical event line. If the full label cannot fit in the
-      // usable viewport, omit it until the user pans it back into view.
-      const labelLeft = x - 1;
+      const visualTheme = document.documentElement.dataset.visualTheme || 'gradient';
+      const isMetroTheme = visualTheme === 'metro';
+      const isFlatTheme = visualTheme === 'flat';
+      const leaderX = Math.round(x) + 0.5;
+
+      // The event marker, connector, and the label's absolute left-most edge
+      // share one x coordinate. Borders and Metro accents extend inward from
+      // this edge rather than being centered over the connector.
+      // Metro's 4 px accent straddles the connector axis: place its outer
+      // edge one pixel left so the 2 px connector remains fully inside it.
+      // Opaque themes keep the label's true outer edge on the connector axis.
+      const labelLeft = isMetroTheme ? leaderX - 1 : leaderX;
       const labelRight = labelLeft + labelWidth;
 
       if (labelLeft < edgePadding || labelRight > usableRight) return;
@@ -1241,12 +1246,27 @@
       const labelHeight = 27;
       const laneGap = 34;
       const labelTop = isAbove ? axisY - 58 - lane * laneGap : axisY + 36 + lane * laneGap;
-      // Enter the owning label by two pixels so the connector cannot appear to
-      // stop short at a rounded edge. Duration spans stack outward toward their lane.
-      const leaderEndY = isAbove ? labelTop + labelHeight - 2 : labelTop + 2;
 
-      // The marker, connector, year, and label all share the true event x.
-      const leaderX = Math.round(x) + 0.5;
+      // Theme-specific attachment geometry:
+      // - Gradient joins the straight portion of the rounded left edge.
+      // - Flat joins the exact square corner.
+      // - Metro joins the near end of its short 4 px accent, never protruding
+      //   beyond that accent.
+      const gradientRadius = 8;
+      const metroAccentTop = 5;
+      const metroAccentBottom = 22;
+      let leaderEndY;
+      if (isMetroTheme) {
+        leaderEndY = isAbove
+          ? labelTop + metroAccentBottom
+          : labelTop + metroAccentTop;
+      } else if (isFlatTheme) {
+        leaderEndY = isAbove ? labelTop : labelTop + labelHeight;
+      } else {
+        leaderEndY = isAbove
+          ? labelTop + gradientRadius
+          : labelTop + labelHeight - gradientRadius;
+      }
 
       const microLane = hasRange ? (durationLanes.get(event.id) || 0) : 0;
       const spanOffset = hasRange ? 3 + microLane * 4 : 0;
@@ -1402,6 +1422,10 @@
         label.style.setProperty('--event-color', event.color);
         label.style.setProperty('--event-color-deep', `color-mix(in srgb, ${event.color} 76%, #08111f)`);
         label.style.setProperty('--event-color-light', `color-mix(in srgb, ${event.color} 58%, white)`);
+        // The DOM label owns the final visible connector segment. It starts at
+        // the timeline dot and overlaps the label's left edge, producing a
+        // continuous balloon-string connection in every visual theme.
+        label.style.setProperty('--leader-distance', `${Math.max(0, Math.abs(spanY - labelTop))}px`);
         label.style.maxWidth = `${labelWidth}px`;
         labelLayer.appendChild(label);
         state.eventLabelZones.push({
@@ -1570,46 +1594,21 @@
 
   function drawLeaderLines(axisY) {
     if (!state.pendingLeaders.length) return;
-    const gap = 4;
 
+    // Opaque themes place this canvas behind the DOM labels, so each front
+    // block naturally masks connectors belonging to events behind it. Metro
+    // places it above transparent labels so neighboring connectors remain
+    // visible through them.
     for (const leader of state.pendingLeaders) {
-      const minY = Math.min(leader.y1, leader.y2);
-      const maxY = Math.max(leader.y1, leader.y2);
-      let segments = [[minY, maxY]];
-
-      // Hide portions passing behind unrelated event labels, while preserving
-      // one strictly vertical connector from the true event position.
-      for (const zone of state.eventLabelZones) {
-        if (zone.ownerId === leader.ownerId) continue;
-        if (leader.x < zone.x1 - gap || leader.x > zone.x2 + gap) continue;
-
-        const cut1 = zone.y1 - gap;
-        const cut2 = zone.y2 + gap;
-
-        segments = segments.flatMap(([a, b]) => {
-          if (cut2 <= a || cut1 >= b) return [[a, b]];
-
-          const parts = [];
-          if (cut1 > a) parts.push([a, Math.min(cut1, b)]);
-          if (cut2 < b) parts.push([Math.max(cut2, a), b]);
-          return parts;
-        });
-      }
-
-      ctx.save();
-      ctx.strokeStyle = colorWithAlpha(leader.event.color, 1);
-      ctx.lineWidth = 2;
-      ctx.lineCap = 'butt';
-
-      for (const [a, b] of segments) {
-        if (b - a < 0.5) continue;
-        ctx.beginPath();
-        ctx.moveTo(leader.x, a);
-        ctx.lineTo(leader.x, b);
-        ctx.stroke();
-      }
-
-      ctx.restore();
+      leaderCtx.save();
+      leaderCtx.strokeStyle = colorWithAlpha(leader.event.color, 1);
+      leaderCtx.lineWidth = 2;
+      leaderCtx.lineCap = 'butt';
+      leaderCtx.beginPath();
+      leaderCtx.moveTo(leader.x, leader.y1);
+      leaderCtx.lineTo(leader.x, leader.y2);
+      leaderCtx.stroke();
+      leaderCtx.restore();
     }
   }
 
@@ -1653,12 +1652,15 @@
       return;
     }
 
-    // Detail interaction is temporarily disconnected. Clicking an event,
-    // era block, or empty timeline space performs no action.
-    if (state.selectedEvent) {
-      state.selectedEvent = null;
-      scheduleRender();
+    if (event.target.closest('a, button, input, select, textarea, [role="button"]')) return;
+
+    const target = targetAtClientPoint(event.clientX, event.clientY);
+    if (target) {
+      openDetails(target.event, event.clientX, event.clientY);
+      return;
     }
+
+    closeDetails();
   }
 
   function detailMarkup(event) {
@@ -1891,8 +1893,7 @@
       state.viewEnd = state.viewStart + targetSpan;
     }
 
-    // Search navigation focuses the viewport only. It must not create
-    // a persistent selected-event state while details are disconnected.
+    // Search navigation focuses the viewport without opening details.
     state.selectedEvent = null;
     searchResultCount.textContent =
       `${state.searchMatchIndex + 1} / ${state.searchMatches.length}`;

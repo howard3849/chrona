@@ -1829,12 +1829,31 @@ input::placeholder { color: #737b87 !important; -webkit-text-fill-color: #737b87
 .style-preview i:nth-child(3) { left: 18px; bottom: 6px; width: 61px; --preview-color: #5c9a67; }
 .style-preview-gradient i { background: linear-gradient(90deg, color-mix(in srgb, var(--preview-color) 78%, #08111f), var(--preview-color), color-mix(in srgb, var(--preview-color) 58%, white)); box-shadow: 0 2px 4px color-mix(in srgb, var(--preview-color) 24%, transparent); }
 .style-preview-flat i { background: color-mix(in srgb, var(--preview-color) 17%, var(--surface-solid)); border: 1px solid color-mix(in srgb, var(--preview-color) 76%, #08111f); }
+
+.style-preview-metro i {
+  height: 11px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--preview-color);
+  color: var(--preview-color);
+}
+.style-preview-metro i::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  right: 3px;
+  top: 2px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 0 4px 0 color-mix(in srgb, currentColor 62%, transparent);
+}
 .settings-panel .theme-control { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
 .settings-panel .theme-control button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 
 /* Flat theme: the original diagram-like Chrona look. */
 :root[data-visual-theme="flat"] .event-label {
-  border-radius: 2px !important;
+  border-radius: 0 !important;
   color: color-mix(in srgb, var(--event-color) 76%, #08111f) !important;
   -webkit-text-fill-color: currentColor !important;
   background: color-mix(in srgb, var(--event-color) 16%, var(--surface-solid)) !important;
@@ -1865,8 +1884,314 @@ input::placeholder { color: #737b87 !important; -webkit-text-fill-color: #737b87
 }
 :root[data-visual-theme="flat"] .event-thumbnail { border: 1px solid color-mix(in srgb, var(--event-color) 42%, var(--border)); background: var(--surface-solid); }
 
+/* Metro theme: no block fill, one continuous category-colored vertical rule. */
+:root[data-visual-theme="metro"] .event-label {
+  border-radius: 0 !important;
+  color: var(--event-color) !important;
+  -webkit-text-fill-color: currentColor !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-left: 2px solid var(--event-color) !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  overflow: visible;
+}
+:root[data-visual-theme="metro"] .event-label::before {
+  content: none !important;
+  display: none !important;
+}
+:root[data-visual-theme="metro"] .event-label-text {
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+  filter: none !important;
+}
+:root[data-visual-theme="metro"] .event-label:hover,
+:root[data-visual-theme="metro"] .event-label.is-search-match {
+  filter: brightness(.92) saturate(1.12) !important;
+  box-shadow: none !important;
+}
+:root[data-theme="dark"][data-visual-theme="metro"] .event-label {
+  color: color-mix(in srgb, var(--event-color) 78%, white) !important;
+  border-left-color: color-mix(in srgb, var(--event-color) 78%, white) !important;
+}
+:root[data-visual-theme="metro"] .event-thumbnail {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 @media (max-width: 700px) {
   .settings-panel { top: 62px; right: 10px; }
   .style-option { grid-template-columns: 78px 1fr 18px; }
   .style-preview { width: 78px; }
+}
+
+/* Chrona theme geometry fix — square Flat blocks and continuous leaders. */
+:root[data-visual-theme="flat"] .event-label {
+  border-radius: 0 !important;
+  clip-path: none !important;
+  background-image: none !important;
+}
+
+/* Draw the owning edge above the block surface so the canvas leader visually
+   reaches the block without being hidden by the DOM label. */
+:root[data-visual-theme="flat"] .event-label::after,
+:root[data-visual-theme="metro"] .event-label::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  left: -1px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  pointer-events: none;
+  background: var(--event-color);
+}
+
+:root[data-visual-theme="flat"] .event-label-above::after,
+:root[data-visual-theme="metro"] .event-label-above::after {
+  bottom: -4px;
+}
+
+:root[data-visual-theme="flat"] .event-label-below::after,
+:root[data-visual-theme="metro"] .event-label-below::after {
+  top: -4px;
+}
+
+:root[data-visual-theme="metro"] .event-label {
+  border-left-width: 4px !important;
+  clip-path: none !important;
+  background-image: none !important;
+}
+
+:root[data-visual-theme="metro"] .event-label::after {
+  left: -4px;
+  width: 4px;
+}
+
+:root[data-theme="dark"][data-visual-theme="metro"] .event-label::after {
+  background: color-mix(in srgb, var(--event-color) 78%, white);
+}
+
+/* Metro refinement — transparent labels with a text-height accent rule. */
+:root[data-visual-theme="metro"] .event-label {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-left: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  overflow: visible !important;
+}
+
+/* The canvas connector remains visible through the transparent label. Only
+   the short rule beside the title is drawn by the DOM label itself. */
+:root[data-visual-theme="metro"] .event-label::after {
+  content: "" !important;
+  position: absolute !important;
+  z-index: 3 !important;
+  left: 0 !important;
+  top: 5px !important;
+  bottom: auto !important;
+  width: 4px !important;
+  height: 1.3em !important;
+  background: var(--event-color) !important;
+  pointer-events: none !important;
+}
+
+:root[data-theme="dark"][data-visual-theme="metro"] .event-label::after {
+  background: color-mix(in srgb, var(--event-color) 78%, white) !important;
+}
+
+:root[data-visual-theme="metro"] .event-label-text {
+  background: transparent !important;
+}
+
+/* Metro continuity refinement — full leader plus a short title accent. */
+:root[data-visual-theme="metro"] .event-label {
+  /* The label remains visually transparent so neighboring leaders show through. */
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding-left: 6px !important;
+  isolation: auto !important;
+}
+
+/* Continue the thin timeline leader through the entire label height to its
+   top-left corner. This sits above the transparent label and cannot be hidden. */
+:root[data-visual-theme="metro"] .event-label::before {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  z-index: 2 !important;
+  left: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 2px !important;
+  background: var(--event-color) !important;
+  pointer-events: none !important;
+}
+
+/* Keep the prominent accent only beside the text rather than across the full
+   block height. It overlays the thin continuous leader. */
+:root[data-visual-theme="metro"] .event-label::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  z-index: 3 !important;
+  left: 0 !important;
+  top: 5px !important;
+  bottom: auto !important;
+  width: 4px !important;
+  height: 1.3em !important;
+  background: var(--event-color) !important;
+  pointer-events: none !important;
+}
+
+:root[data-theme="dark"][data-visual-theme="metro"] .event-label::before,
+:root[data-theme="dark"][data-visual-theme="metro"] .event-label::after {
+  background: color-mix(in srgb, var(--event-color) 78%, white) !important;
+}
+
+
+/* Metro final connector geometry: one short 4 px accent, with the canvas
+   leader meeting its near edge exactly. */
+:root[data-visual-theme="metro"] .event-label {
+  padding-left: 7px !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  overflow: visible !important;
+}
+
+/* Remove the earlier full-height DOM leader; the canvas owns the connector. */
+:root[data-visual-theme="metro"] .event-label::before {
+  content: none !important;
+  display: none !important;
+}
+
+:root[data-visual-theme="metro"] .event-label::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  z-index: 3 !important;
+  left: 0 !important;
+  top: 5px !important;
+  width: 4px !important;
+  height: 17px !important;
+  background: var(--event-color) !important;
+  pointer-events: none !important;
+}
+
+:root[data-theme="dark"][data-visual-theme="metro"] .event-label::after {
+  background: color-mix(in srgb, var(--event-color) 78%, white) !important;
+}
+
+
+/* Chrona balloon-string connector fix — global across Gradient, Flat, Metro.
+   The owning connector is rendered on the DOM label's left edge so it cannot
+   be hidden by the label surface or separated by antialiasing/padding gaps. */
+.event-label:not(.period-label)::before {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  z-index: 8 !important;
+  width: 2px !important;
+  background: var(--event-color) !important;
+  pointer-events: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Above-axis labels: overlap the complete left edge, then continue down to
+   the event dot. */
+.event-label-above:not(.period-label)::before {
+  left: 0 !important;
+  top: 0 !important;
+  bottom: auto !important;
+  height: var(--leader-distance, 0px) !important;
+}
+
+/* Below-axis labels: begin at the event dot, continue to the block, and
+   overlap the complete left edge. */
+.event-label-below:not(.period-label)::before {
+  left: 0 !important;
+  top: calc(-1 * var(--leader-distance, 0px)) !important;
+  bottom: auto !important;
+  height: calc(var(--leader-distance, 0px) + 100%) !important;
+}
+
+/* Metro's 4 px title accent is centered on the same connector axis. */
+:root[data-visual-theme="metro"] .event-label:not(.period-label)::before {
+  left: 1px !important;
+}
+
+:root[data-theme="dark"] .event-label:not(.period-label)::before {
+  background: var(--event-color) !important;
+}
+
+
+/* Dedicated leader overlay: all event connectors stay continuous above labels. */
+#timelineCanvas,
+.label-layer,
+.leader-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.label-layer { z-index: 2; }
+.leader-canvas {
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Connector geometry is owned exclusively by leaderCanvas. Disable older
+   label pseudo-elements that attempted to extend the leader and caused
+   theme-dependent offsets and sibling-overlap gaps. */
+.event-label:not(.period-label)::before {
+  content: none !important;
+  display: none !important;
+}
+
+/* The label begins exactly at the connector x coordinate. Borders extend
+   inward, so the connector sits on the absolute left-most edge, not in the
+   middle of the border thickness. */
+:root[data-visual-theme="flat"] .event-label {
+  border-radius: 0 !important;
+}
+
+/* Metro keeps only its short 4 px accent. It starts at the same absolute
+   left edge as the 2 px connector and extends inward to the right. */
+:root[data-visual-theme="metro"] .event-label::after {
+  left: 0 !important;
+}
+
+
+/* Chrona connector occlusion + attachment correction.
+   Opaque labels mask rear connectors; Metro remains transparent. */
+.label-layer { z-index: 2; }
+.leader-canvas { z-index: 1; }
+:root[data-visual-theme="metro"] .leader-canvas { z-index: 3; }
+
+/* Keep Metro's short accent fully wrapped around the 2 px connector axis. */
+:root[data-visual-theme="metro"] .event-label::after {
+  left: 0 !important;
+  top: 5px !important;
+  width: 4px !important;
+  height: 17px !important;
 }
