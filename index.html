@@ -35,7 +35,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
         </button>
         <label class="search-box header-field" for="timelineSearch">
-          <input id="timelineSearch" type="search" placeholder="Event, category, or year" autocomplete="off" />
+          <input id="timelineSearch" type="search" placeholder="Event, group, or year" autocomplete="off" />
         </label>
         <div id="searchResults" class="search-results" hidden>
           <button id="searchPrevious" type="button" title="Previous result" aria-label="Previous search result">‹</button>
@@ -59,6 +59,21 @@
       </div>
       <button id="settingsClose" class="settings-close" type="button" aria-label="Close settings">×</button>
     </div>
+
+    <section class="settings-section" aria-labelledby="sheetSourceHeading">
+      <h3 id="sheetSourceHeading">Default Google Sheet</h3>
+      <div class="default-sheet-settings">
+        <label for="defaultSheetUrl">Saved only in this browser</label>
+        <input id="defaultSheetUrl" type="url" spellcheck="false" placeholder="Paste a Google Sheet URL" aria-describedby="defaultSheetHelp" />
+        <p id="defaultSheetHelp">This default is stored locally on this device. The Sheet URL in the top banner remains temporary unless you save it here.</p>
+        <div class="default-sheet-actions">
+          <button id="useCurrentSheetUrl" type="button">Use banner URL</button>
+          <button id="saveDefaultSheetUrl" type="button">Save default</button>
+          <button id="clearDefaultSheetUrl" type="button">Clear</button>
+        </div>
+        <div id="defaultSheetStatus" class="default-sheet-status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
 
     <section class="settings-section" aria-labelledby="timelineStyleHeading">
       <h3 id="timelineStyleHeading">Timeline style</h3>
@@ -92,11 +107,25 @@
   </aside>
 
   <section class="toolbar">
-    <label class="primary-set">
-      <span>Primary set</span>
-      <select id="primaryCategory" aria-label="Primary category displayed above the timeline"></select>
-    </label>
-    <div id="categoryFilters" class="category-filters"></div>
+    <div class="above-sets-control">
+      <span class="above-sets-label">Above sets</span>
+      <button id="aboveSetsButton" class="above-sets-button" type="button" aria-haspopup="dialog" aria-expanded="false">
+        <span id="aboveSetsSummary">Choose groups</span><span aria-hidden="true">▾</span>
+      </button>
+      <div id="aboveSetsMenu" class="above-sets-menu" hidden role="dialog" aria-label="Choose groups shown above the timeline">
+        <div class="above-sets-menu-header">
+          <strong>Above sets</strong>
+          <span id="aboveSetsCount"></span>
+        </div>
+        <input id="aboveSetsSearch" class="category-search" type="search" placeholder="Search groups" autocomplete="off" aria-label="Search groups" />
+        <div id="aboveSetsList" class="category-filters"></div>
+      </div>
+    </div>
+
+    <div class="visible-sets-control">
+      <span class="visible-sets-label">Visible</span>
+      <div id="categoryQuickFilters" class="category-quick-filters" aria-label="Visible timeline group toggles"></div>
+    </div>
   </section>
 
   <main>

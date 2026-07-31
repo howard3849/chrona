@@ -1,9 +1,7 @@
 (() => {
   'use strict';
 
-  const DEFAULT_REGULAR_SHEET_ID = '1TsjYfmw1v3xTQP0vySW9zBapdWHFRwuq20SuNzW7quk';
-  const DEFAULT_PUBLISHED_SHEET_ID = '2PACX-1vRgzCOgds0-rqlnhKnCCNzAyrserZ4nZNOxxcTwILsqtzTBWdORLv7aAQDRbIzP3t6YsLV0iT9FKxj-';
-  const DEFAULT_SHEET_URL = `https://docs.google.com/spreadsheets/d/${DEFAULT_REGULAR_SHEET_ID}/edit`;
+  const DEFAULT_SHEET_STORAGE_KEY = 'chrona-default-sheet-url';
   const DEFAULT_EVENT_GID = 681184261;
   const DEFAULT_CATEGORY_GID = 1068523108;
   const DEFAULT_AXIS_Y_RATIO = 0.47;
@@ -20,10 +18,15 @@
   const leaderCtx = leaderCanvas.getContext('2d');
   const tooltip = document.getElementById('tooltip');
   const statusEl = document.getElementById('status');
-  const filtersEl = document.getElementById('categoryFilters');
+  const quickFiltersEl = document.getElementById('categoryQuickFilters');
+  const aboveSetsButton = document.getElementById('aboveSetsButton');
+  const aboveSetsSummary = document.getElementById('aboveSetsSummary');
+  const aboveSetsMenu = document.getElementById('aboveSetsMenu');
+  const aboveSetsCount = document.getElementById('aboveSetsCount');
+  const aboveSetsSearch = document.getElementById('aboveSetsSearch');
+  const aboveSetsList = document.getElementById('aboveSetsList');
   const sheetUrlInput = document.getElementById('sheetUrl');
   const filterTemplate = document.getElementById('filterTemplate');
-  const primaryCategorySelect = document.getElementById('primaryCategory');
   const zoomDial = document.getElementById('zoomDial');
   const zoomRail = document.querySelector('.zoom-rail');
   const themeButtons = [...document.querySelectorAll('.theme-option')];
@@ -32,6 +35,11 @@
   const settingsPanel = document.getElementById('settingsPanel');
   const settingsBackdrop = document.getElementById('settingsBackdrop');
   const settingsClose = document.getElementById('settingsClose');
+  const defaultSheetUrlInput = document.getElementById('defaultSheetUrl');
+  const useCurrentSheetUrlButton = document.getElementById('useCurrentSheetUrl');
+  const saveDefaultSheetUrlButton = document.getElementById('saveDefaultSheetUrl');
+  const clearDefaultSheetUrlButton = document.getElementById('clearDefaultSheetUrl');
+  const defaultSheetStatus = document.getElementById('defaultSheetStatus');
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
   const searchInput = document.getElementById('timelineSearch');
   const searchToggle = document.getElementById('searchToggle');
@@ -59,7 +67,7 @@
     events: [],
     categories: new Map(),
     enabledCategories: new Set(),
-    primaryCategory: null,
+    aboveGroups: new Set(),
     minTime: 1700,
     maxTime: 2026,
     viewStart: 1700,
@@ -107,11 +115,20 @@
     overviewDragStartViewEnd: 0
   };
 
+  try {
+    const savedAboveGroups = JSON.parse(localStorage.getItem('chrona-above-groups') || '[]');
+    if (Array.isArray(savedAboveGroups)) state.aboveGroups = new Set(savedAboveGroups.map(String));
+  } catch (_) {
+    localStorage.removeItem('chrona-above-groups');
+  }
+
   const importanceRank = { Major: 3, Medium: 2, Minor: 1 };
   const loadedTimelineThumbnails = new Set();
   const failedTimelineThumbnails = new Set();
 
-  sheetUrlInput.value = DEFAULT_SHEET_URL;
+  const savedDefaultSheetUrl = localStorage.getItem(DEFAULT_SHEET_STORAGE_KEY) || '';
+  sheetUrlInput.value = savedDefaultSheetUrl;
+  defaultSheetUrlInput.value = savedDefaultSheetUrl;
 
   const savedTheme = localStorage.getItem('timeline-theme') || 'auto';
   const savedVisualTheme = localStorage.getItem('chrona-visual-theme') || 'gradient';
@@ -122,7 +139,34 @@
   settingsToggle.addEventListener('click', () => toggleSettings());
   settingsClose.addEventListener('click', closeSettings);
   settingsBackdrop.addEventListener('click', closeSettings);
-  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSettings(); });
+  useCurrentSheetUrlButton.addEventListener('click', () => {
+    defaultSheetUrlInput.value = sheetUrlInput.value.trim();
+    defaultSheetStatus.textContent = defaultSheetUrlInput.value ? 'Banner URL copied. Select Save default to keep it.' : 'The banner URL is empty.';
+  });
+  saveDefaultSheetUrlButton.addEventListener('click', () => {
+    const value = defaultSheetUrlInput.value.trim();
+    if (!value) {
+      defaultSheetStatus.textContent = 'Enter a Google Sheet URL first.';
+      defaultSheetUrlInput.focus();
+      return;
+    }
+    try {
+      parseSheetSource(value);
+      localStorage.setItem(DEFAULT_SHEET_STORAGE_KEY, value);
+      defaultSheetUrlInput.value = value;
+      sheetUrlInput.value = value;
+      defaultSheetStatus.textContent = 'Default saved and copied to the banner. Select Reload to load it.';
+    } catch (error) {
+      defaultSheetStatus.textContent = error.message;
+      defaultSheetUrlInput.focus();
+    }
+  });
+  clearDefaultSheetUrlButton.addEventListener('click', () => {
+    localStorage.removeItem(DEFAULT_SHEET_STORAGE_KEY);
+    defaultSheetUrlInput.value = '';
+    defaultSheetStatus.textContent = 'Saved default cleared. The current banner URL was not changed.';
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeSettings(); closeAboveSetsMenu(); } });
   systemTheme.addEventListener?.('change', () => {
     if ((localStorage.getItem('timeline-theme') || 'auto') === 'auto') {
       applyTheme('auto', false);
@@ -160,10 +204,44 @@
   };
   zoomRail?.addEventListener('pointerenter', hideYearCursor);
   zoomRail?.addEventListener('pointermove', hideYearCursor);
-  zoomRail?.addEventListener('pointerdown', hideYearCursor);
-  primaryCategorySelect.addEventListener('change', () => {
-    state.primaryCategory = primaryCategorySelect.value || null;
-    scheduleRender();
+  zoomRail?.addEventListener('pointerdown', event => {
+    hideYearCursor();
+    event.stopPropagation();
+  });
+  zoomRail?.addEventListener('click', event => event.stopPropagation());
+  zoomRail?.addEventListener('dblclick', event => event.stopPropagation());
+  function positionAboveSetsMenu() {
+    if (!aboveSetsMenu || aboveSetsMenu.hidden || !aboveSetsButton) return;
+    const buttonRect = aboveSetsButton.getBoundingClientRect();
+    const menuWidth = Math.min(360, Math.max(260, window.innerWidth - 24));
+    const left = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, buttonRect.left));
+    aboveSetsMenu.style.width = `${menuWidth}px`;
+    aboveSetsMenu.style.left = `${left}px`;
+    aboveSetsMenu.style.right = 'auto';
+    aboveSetsMenu.style.top = `${buttonRect.bottom + 8}px`;
+  }
+
+  aboveSetsButton?.addEventListener('click', event => {
+    event.stopPropagation();
+    const willOpen = aboveSetsMenu.hidden;
+    aboveSetsMenu.hidden = !willOpen;
+    aboveSetsButton.setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) {
+      aboveSetsSearch.value = '';
+      filterAboveSetsMenu('');
+      positionAboveSetsMenu();
+      requestAnimationFrame(() => aboveSetsSearch.focus());
+    }
+  });
+  window.addEventListener('resize', positionAboveSetsMenu);
+  window.addEventListener('scroll', positionAboveSetsMenu, true);
+  aboveSetsMenu?.addEventListener('pointerdown', event => event.stopPropagation());
+  aboveSetsMenu?.addEventListener('click', event => event.stopPropagation());
+  aboveSetsSearch?.addEventListener('input', () => filterAboveSetsMenu(aboveSetsSearch.value));
+  document.addEventListener('pointerdown', event => {
+    if (!aboveSetsMenu?.hidden && !aboveSetsMenu.contains(event.target) && event.target !== aboveSetsButton) {
+      closeAboveSetsMenu();
+    }
   });
 
   viewport.addEventListener('wheel', onWheel, { passive: false });
@@ -366,15 +444,8 @@
     if (source.type === 'regular') {
       add('shared sheet export', `https://docs.google.com/spreadsheets/d/${source.id}/export?format=csv&gid=${gid}`);
       add('shared sheet query', `https://docs.google.com/spreadsheets/d/${source.id}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`);
-      if (source.id === DEFAULT_REGULAR_SHEET_ID) {
-        add('published sheet fallback', `https://docs.google.com/spreadsheets/d/e/${DEFAULT_PUBLISHED_SHEET_ID}/pub?gid=${gid}&single=true&output=csv`);
-      }
     } else {
       add('published sheet', `https://docs.google.com/spreadsheets/d/e/${source.id}/pub?gid=${gid}&single=true&output=csv`);
-      if (source.id === DEFAULT_PUBLISHED_SHEET_ID) {
-        add('shared sheet export fallback', `https://docs.google.com/spreadsheets/d/${DEFAULT_REGULAR_SHEET_ID}/export?format=csv&gid=${gid}`);
-        add('shared sheet query fallback', `https://docs.google.com/spreadsheets/d/${DEFAULT_REGULAR_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`);
-      }
     }
     return candidates;
   }
@@ -422,6 +493,27 @@
     return Number.isFinite(n) ? n : null;
   }
 
+  function normalizeElementType(value) {
+    const normalized = String(value || 'event').trim().toLowerCase();
+    if (normalized === 'title') return 'Title';
+    if (normalized === 'period' || normalized === 'era') return 'Period';
+    return 'Event';
+  }
+
+  function generateEventId(group, year, headline, index = 0) {
+    const slug = value => String(value || '')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 42);
+    const groupCode = slug(group).split('-').filter(Boolean).map(part => part[0]).join('').slice(0, 8) || 'GROUP';
+    const yearCode = slug(year || 'UNDATED') || 'UNDATED';
+    const headlineCode = slug(headline || 'EVENT') || 'EVENT';
+    return `${groupCode}-${yearCode}-${headlineCode}${index ? `-${index + 2}` : ''}`;
+  }
+
   function toTimelineTime(year, month, day, time) {
     const y = parseNumber(year);
     if (y == null) return null;
@@ -446,60 +538,58 @@
   }
 
   const EMBEDDED_CATEGORIES = [
-    { Category: 'United States', Color: '#2563EB', 'Default Visible': 'TRUE', 'Default Role': 'Core', 'Default Position': 'Above' },
-    { Category: 'China', Color: '#DC2626', 'Default Visible': 'TRUE', 'Default Role': 'Reference', 'Default Position': 'Below' },
-    { Category: 'Ancient Rome', Color: '#7C3AED', 'Default Visible': 'TRUE', 'Default Role': 'Reference', 'Default Position': 'Below' },
-    { Category: 'Britain', Color: '#D97706', 'Default Visible': 'TRUE', 'Default Role': 'Reference', 'Default Position': 'Below' },
-    { Category: 'Germany', Color: '#475569', 'Default Visible': 'TRUE', 'Default Role': 'Reference', 'Default Position': 'Below' }
+    { Group: 'United States', Color: '#2563EB', 'Default Visible': 'TRUE', 'Default Position': 'Above' },
+    { Group: 'China', Color: '#DC2626', 'Default Visible': 'TRUE', 'Default Position': 'Below' },
+    { Group: 'Ancient Rome', Color: '#7C3AED', 'Default Visible': 'TRUE', 'Default Position': 'Below' },
+    { Group: 'Britain', Color: '#D97706', 'Default Visible': 'TRUE', 'Default Position': 'Below' },
+    { Group: 'Germany', Color: '#475569', 'Default Visible': 'TRUE', 'Default Position': 'Below' }
   ];
 
   const EMBEDDED_EVENTS = [
-    { Year:'1776', Month:'7', Day:'4', 'Display Date':'July 4, 1776', Headline:'U.S. Declaration of Independence', Text:'The thirteen colonies declared independence from Great Britain.', Media:'https://upload.wikimedia.org/wikipedia/commons/1/15/Declaration_independence.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Declaration of Independence', Category:'United States', Role:'Core', 'Element Type':'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1776-DECLARATION' },
-    { Year:'1787', Month:'9', Day:'17', 'Display Date':'September 17, 1787', Headline:'U.S. Constitution Signed', Text:'Delegates signed the Constitution in Philadelphia.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/4d/Scene_at_the_Signing_of_the_Constitution_of_the_United_States.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Signing of the U.S. Constitution', Category:'United States', Role:'Core', 'Element Type':'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1787-CONSTITUTION' },
-    { Year:'1839', 'End Year':'1842', 'Display Date':'1839–1842', Headline:'First Opium War', Text:'Conflict between Qing China and Britain led to the Treaty of Nanking.', Media:'https://upload.wikimedia.org/wikipedia/commons/0/0e/Destroying_Chinese_war_junks%2C_by_E._Duncan_%281843%29.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Naval battle during the First Opium War', Category:'China', Role:'Reference', 'Element Type':'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1839-OPIUM-WAR-1' },
-    { Year:'1861', Month:'4', Day:'12', 'End Year':'1865', 'End Month':'4', 'End Day':'9', 'Display Date':'1861–1865', Headline:'American Civil War', Text:'War between the Union and the Confederacy transformed the United States and ended legal slavery.', Media:'https://upload.wikimedia.org/wikipedia/commons/9/9a/Fall_of_Richmond_Va_on_the_night_of_April_2nd_1865.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Richmond during the Civil War', Category:'United States', Role:'Core', 'Element Type':'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1861-CIVIL-WAR' },
-    { Year:'1911', Month:'10', Day:'10', 'End Year':'1912', 'End Month':'2', 'End Day':'12', 'Display Date':'1911–1912', Headline:'Xinhai Revolution', Text:'The revolution ended imperial rule and led to the establishment of the Republic of China.', Media:'https://upload.wikimedia.org/wikipedia/commons/8/8f/Wuchang_Uprising.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Wuchang Uprising', Category:'China', Role:'Reference', 'Element Type':'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1911-XINHAI' },
-    { Year:'1929', Month:'10', Day:'24', 'Display Date':'October 1929', Headline:'Wall Street Crash', Text:'The stock-market collapse became a defining event of the Great Depression.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/4c/Crowd_outside_nyse.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Crowd outside the New York Stock Exchange', Category:'United States', Role:'Core', 'Element Type':'Event', Position:'Above', Importance:'Medium', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1929-WALL-STREET' },
-    { Year:'1937', Month:'7', Day:'7', 'End Year':'1945', 'End Month':'9', 'End Day':'2', 'Display Date':'1937–1945', Headline:'Second Sino-Japanese War', Text:'Full-scale war between China and Japan became part of the wider Second World War.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/46/Chinese_soldiers_in_house_to_house_fighting_in_Tai%27er_zhuang.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Chinese soldiers during the war', Category:'China', Role:'Reference', 'Element Type':'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1937-SINO-JAPANESE-WAR' },
-    { Year:'1949', Month:'10', Day:'1', 'Display Date':'October 1, 1949', Headline:'People’s Republic of China Founded', Text:'Mao Zedong proclaimed the People’s Republic of China in Beijing.', Media:'https://upload.wikimedia.org/wikipedia/commons/5/51/Mao_Zedong_proclaiming_the_establishment_of_the_PRC_in_1949.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Proclamation ceremony in Beijing', Category:'China', Role:'Reference', 'Element Type':'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1949-PRC' },
-    { Year:'1969', Month:'7', Day:'20', 'Display Date':'July 20, 1969', Headline:'Apollo 11 Moon Landing', Text:'Neil Armstrong and Buzz Aldrin became the first people to walk on the Moon.', Media:'https://upload.wikimedia.org/wikipedia/commons/9/98/Aldrin_Apollo_11_original.jpg', 'Media Credit':'NASA / Wikimedia Commons', 'Media Caption':'Buzz Aldrin on the Moon', Category:'United States', Role:'Core', 'Element Type':'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1969-APOLLO-11' },
-    { Year:'1978', Month:'12', Day:'18', 'Display Date':'December 1978', Headline:'China Begins Reform and Opening', Text:'The Third Plenum marked the beginning of major economic reform under Deng Xiaoping.', Media:'https://upload.wikimedia.org/wikipedia/commons/5/5c/Deng_Xiaoping_1979.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Deng Xiaoping', Category:'China', Role:'Reference', 'Element Type':'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1978-REFORM' },
-    { Year:'-27', 'End Year':'476', 'Display Date':'27 BCE–476 CE', Headline:'Roman Empire (Western)', Text:'Reference period spanning the Roman imperial era in the West.', Category:'Ancient Rome', Role:'Reference', 'Element Type':'Period', Position:'Below', Importance:'Major', Color:'#7C3AED', Visible:'TRUE', 'Event ID':'ROME-0027BCE-0476' },
-    { Year:'1707', 'End Year':'1997', 'Display Date':'1707–1997', Headline:'British Empire (broad reference period)', Text:'A simplified reference span for Britain’s imperial period.', Category:'Britain', Role:'Reference', 'Element Type':'Period', Position:'Below', Importance:'Major', Color:'#D97706', Visible:'TRUE', 'Event ID':'GB-1707-1997-EMPIRE' },
-    { Year:'1933', 'End Year':'1945', 'Display Date':'1933–1945', Headline:'Nazi Regime', Text:'Period during which Adolf Hitler and the Nazi Party ruled Germany.', Category:'Germany', Role:'Reference', 'Element Type':'Period', Position:'Below', Importance:'Major', Color:'#475569', Visible:'TRUE', 'Event ID':'DE-1933-1945-NAZI' },
-    { Year:'1644', 'End Year':'1912', 'Display Date':'1644–1912', Headline:'Qing Dynasty', Text:'China’s final imperial dynasty, used here as a long-duration reference block.', Category:'China', Role:'Reference', 'Element Type':'Period', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1644-1912-QING' }
+    { Year:'1776', Month:'7', Day:'4', 'Display Date':'July 4, 1776', Headline:'U.S. Declaration of Independence', Text:'The thirteen colonies declared independence from Great Britain.', Media:'https://upload.wikimedia.org/wikipedia/commons/1/15/Declaration_independence.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Declaration of Independence', Group:'United States', Type:'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1776-DECLARATION' },
+    { Year:'1787', Month:'9', Day:'17', 'Display Date':'September 17, 1787', Headline:'U.S. Constitution Signed', Text:'Delegates signed the Constitution in Philadelphia.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/4d/Scene_at_the_Signing_of_the_Constitution_of_the_United_States.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Signing of the U.S. Constitution', Group:'United States', Type:'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1787-CONSTITUTION' },
+    { Year:'1839', 'End Year':'1842', 'Display Date':'1839–1842', Headline:'First Opium War', Text:'Conflict between Qing China and Britain led to the Treaty of Nanking.', Media:'https://upload.wikimedia.org/wikipedia/commons/0/0e/Destroying_Chinese_war_junks%2C_by_E._Duncan_%281843%29.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Naval battle during the First Opium War', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1839-OPIUM-WAR-1' },
+    { Year:'1861', Month:'4', Day:'12', 'End Year':'1865', 'End Month':'4', 'End Day':'9', 'Display Date':'1861–1865', Headline:'American Civil War', Text:'War between the Union and the Confederacy transformed the United States and ended legal slavery.', Media:'https://upload.wikimedia.org/wikipedia/commons/9/9a/Fall_of_Richmond_Va_on_the_night_of_April_2nd_1865.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Richmond during the Civil War', Group:'United States', Type:'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1861-CIVIL-WAR' },
+    { Year:'1911', Month:'10', Day:'10', 'End Year':'1912', 'End Month':'2', 'End Day':'12', 'Display Date':'1911–1912', Headline:'Xinhai Revolution', Text:'The revolution ended imperial rule and led to the establishment of the Republic of China.', Media:'https://upload.wikimedia.org/wikipedia/commons/8/8f/Wuchang_Uprising.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Wuchang Uprising', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1911-XINHAI' },
+    { Year:'1929', Month:'10', Day:'24', 'Display Date':'October 1929', Headline:'Wall Street Crash', Text:'The stock-market collapse became a defining event of the Great Depression.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/4c/Crowd_outside_nyse.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Crowd outside the New York Stock Exchange', Group:'United States', Type:'Event', Position:'Above', Importance:'Medium', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1929-WALL-STREET' },
+    { Year:'1937', Month:'7', Day:'7', 'End Year':'1945', 'End Month':'9', 'End Day':'2', 'Display Date':'1937–1945', Headline:'Second Sino-Japanese War', Text:'Full-scale war between China and Japan became part of the wider Second World War.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/46/Chinese_soldiers_in_house_to_house_fighting_in_Tai%27er_zhuang.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Chinese soldiers during the war', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1937-SINO-JAPANESE-WAR' },
+    { Year:'1949', Month:'10', Day:'1', 'Display Date':'October 1, 1949', Headline:'People’s Republic of China Founded', Text:'Mao Zedong proclaimed the People’s Republic of China in Beijing.', Media:'https://upload.wikimedia.org/wikipedia/commons/5/51/Mao_Zedong_proclaiming_the_establishment_of_the_PRC_in_1949.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Proclamation ceremony in Beijing', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1949-PRC' },
+    { Year:'1969', Month:'7', Day:'20', 'Display Date':'July 20, 1969', Headline:'Apollo 11 Moon Landing', Text:'Neil Armstrong and Buzz Aldrin became the first people to walk on the Moon.', Media:'https://upload.wikimedia.org/wikipedia/commons/9/98/Aldrin_Apollo_11_original.jpg', 'Media Credit':'NASA / Wikimedia Commons', 'Media Caption':'Buzz Aldrin on the Moon', Group:'United States', Type:'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1969-APOLLO-11' },
+    { Year:'1978', Month:'12', Day:'18', 'Display Date':'December 1978', Headline:'China Begins Reform and Opening', Text:'The Third Plenum marked the beginning of major economic reform under Deng Xiaoping.', Media:'https://upload.wikimedia.org/wikipedia/commons/5/5c/Deng_Xiaoping_1979.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Deng Xiaoping', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1978-REFORM' },
+    { Year:'-27', 'End Year':'476', 'Display Date':'27 BCE–476 CE', Headline:'Roman Empire (Western)', Text:'Reference period spanning the Roman imperial era in the West.', Group:'Ancient Rome', Type:'Period', Position:'Below', Importance:'Major', Color:'#7C3AED', Visible:'TRUE', 'Event ID':'ROME-0027BCE-0476' },
+    { Year:'1707', 'End Year':'1997', 'Display Date':'1707–1997', Headline:'British Empire (broad reference period)', Text:'A simplified reference span for Britain’s imperial period.', Group:'Britain', Type:'Period', Position:'Below', Importance:'Major', Color:'#D97706', Visible:'TRUE', 'Event ID':'GB-1707-1997-EMPIRE' },
+    { Year:'1933', 'End Year':'1945', 'Display Date':'1933–1945', Headline:'Nazi Regime', Text:'Period during which Adolf Hitler and the Nazi Party ruled Germany.', Group:'Germany', Type:'Period', Position:'Below', Importance:'Major', Color:'#475569', Visible:'TRUE', 'Event ID':'DE-1933-1945-NAZI' },
+    { Year:'1644', 'End Year':'1912', 'Display Date':'1644–1912', Headline:'Qing Dynasty', Text:'China’s final imperial dynasty, used here as a long-duration reference block.', Group:'China', Type:'Period', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1644-1912-QING' }
   ];
 
   function applyRows(rawEvents, rawCategories, sourceLabel) {
     state.categories.clear();
     rawCategories.forEach(row => {
-      const name = row.Category?.trim();
+      const name = (row.Group || row.Category || '').trim();
       if (!name) return;
       state.categories.set(name, {
         name,
         color: normalizeHex(row.Color),
         visible: String(row['Default Visible']).toUpperCase() !== 'FALSE',
-        role: row['Default Role'] || 'Reference',
-        position: row['Default Position'] || 'Auto'
+        position: row['Default Position'] || 'Below'
       });
     });
 
     state.events = rawEvents.map((row, index) => {
       const start = toTimelineTime(row.Year, row.Month, row.Day, row.Time);
       const end = toTimelineTime(row['End Year'], row['End Month'], row['End Day'], row['End Time']);
-      const categoryName = (row.Category || row.Group || 'Uncategorized').trim();
-      const category = state.categories.get(categoryName) || { color: '#64748B', role: 'Reference', position: 'Auto', visible: true };
+      const categoryName = (row.Group || row.Category || 'Uncategorized').trim();
+      const category = state.categories.get(categoryName) || { color: '#64748B', position: 'Below', visible: true };
       return {
-        id: row['Event ID'] || `row-${index + 2}`,
+        id: row['Event ID'] || generateEventId(categoryName, row.Year, row.Headline, index),
         headline: row.Headline || '(Untitled)',
         text: row.Text || '',
         displayDate: row['Display Date'] || '',
         start,
         end,
         category: categoryName,
-        role: row.Role || category.role || 'Reference',
-        elementType: row['Element Type'] || 'Event',
-        position: row.Position || category.position || 'Auto',
+        elementType: normalizeElementType(row.Type || row['Element Type'] || 'event'),
+        position: row.Position || category.position || 'Below',
         importance: row.Importance || 'Medium',
         color: normalizeHex(row.Color, category.color),
         visible: String(row.Visible).toUpperCase() !== 'FALSE' && start != null,
@@ -514,10 +604,15 @@
     state.enabledCategories = new Set(
       [...new Set(state.events.map(e => e.category))].filter(name => state.categories.get(name)?.visible !== false)
     );
+    const groupNames = categoryNames();
+    const configuredAbove = groupNames.filter(name => String(state.categories.get(name)?.position || '').toLowerCase() === 'above');
+    state.aboveGroups = new Set([...state.aboveGroups].filter(name => groupNames.includes(name)));
+    if (!state.aboveGroups.size) {
+      const eventAbove = groupNames.filter(name => state.events.some(event => event.category === name && String(event.position).toLowerCase() === 'above'));
+      state.aboveGroups = new Set(configuredAbove.length ? configuredAbove : eventAbove.slice(0, 1));
+    }
     buildFilters();
-    const preferredPrimary = [...state.enabledCategories].find(name => state.categories.get(name)?.role === 'Core') || [...state.enabledCategories][0] || null;
-    state.primaryCategory = state.primaryCategory && state.enabledCategories.has(state.primaryCategory) ? state.primaryCategory : preferredPrimary;
-    buildPrimarySelector();
+    buildAboveSetsMenu();
     const times = state.events.flatMap(e => [e.start, e.end]).filter(v => v != null);
     state.minTime = Math.min(...times);
     state.maxTime = Math.max(...times);
@@ -528,14 +623,24 @@
   async function loadTimeline() {
     statusEl.classList.remove('status-warning');
     statusEl.textContent = 'Loading timeline data…';
+    const requestedUrl = sheetUrlInput.value.trim();
+    if (!requestedUrl) {
+      applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'embedded offline snapshot');
+      statusEl.textContent = `${state.events.length} timeline records loaded — enter a Google Sheet URL in the banner or save a browser default in Settings.`;
+      return;
+    }
     try {
       const source = parseSheetSource(sheetUrlInput.value.trim());
       const eventResult = await fetchCsvCompatible(source, 'TimelineJS Data', DEFAULT_EVENT_GID);
       let categoryResult = null;
       try {
-        categoryResult = await fetchCsvCompatible(source, 'Categories', DEFAULT_CATEGORY_GID);
+        try {
+          categoryResult = await fetchCsvCompatible(source, 'Groups', DEFAULT_CATEGORY_GID);
+        } catch (groupsError) {
+          categoryResult = await fetchCsvCompatible(source, 'Categories', DEFAULT_CATEGORY_GID);
+        }
       } catch (categoryError) {
-        console.warn('Categories tab unavailable; deriving categories from events.', categoryError);
+        console.warn('Groups tab unavailable; deriving groups from events.', categoryError);
       }
       const categoryRows = categoryResult ? rowsToObjects(parseCsv(categoryResult.text)) : [];
       const sourceLabels = [...new Set([eventResult.sourceLabel, categoryResult?.sourceLabel].filter(Boolean))];
@@ -548,48 +653,87 @@
     }
   }
 
+  function categoryNames() {
+    return [...new Set(state.events.map(event => event.category))].sort((a, b) => a.localeCompare(b));
+  }
+
+  function categoryColor(name) {
+    return state.categories.get(name)?.color || state.events.find(event => event.category === name)?.color || '#64748B';
+  }
+
+  function updateCategorySelection(name, enabled) {
+    if (enabled) state.enabledCategories.add(name);
+    else state.enabledCategories.delete(name);
+    buildFilters();
+    scheduleRender();
+  }
+
   function buildFilters() {
-    filtersEl.replaceChildren();
-    const names = [...new Set(state.events.map(e => e.category))].sort();
+    if (!quickFiltersEl) return;
+    quickFiltersEl.replaceChildren();
+    categoryNames().forEach(name => {
+      const color = categoryColor(name);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'category-quick-chip';
+      button.classList.toggle('is-active', state.enabledCategories.has(name));
+      button.style.setProperty('--chip-color', color);
+      button.style.setProperty('--chip-color-deep', `color-mix(in srgb, ${color} 78%, #08111f)`);
+      button.style.setProperty('--chip-color-light', `color-mix(in srgb, ${color} 58%, white)`);
+      button.setAttribute('aria-pressed', String(state.enabledCategories.has(name)));
+      button.setAttribute('title', `${state.enabledCategories.has(name) ? 'Hide' : 'Show'} ${name}`);
+      button.innerHTML = '<span class="category-quick-name"></span>';
+      button.querySelector('.category-quick-name').textContent = name;
+      button.addEventListener('click', () => updateCategorySelection(name, !state.enabledCategories.has(name)));
+      quickFiltersEl.appendChild(button);
+    });
+  }
+
+  function updateAboveGroup(name, above) {
+    if (above) state.aboveGroups.add(name);
+    else state.aboveGroups.delete(name);
+    localStorage.setItem('chrona-above-groups', JSON.stringify([...state.aboveGroups]));
+    buildAboveSetsMenu();
+    scheduleRender();
+  }
+
+  function buildAboveSetsMenu() {
+    if (!aboveSetsList) return;
+    aboveSetsList.replaceChildren();
+    const names = categoryNames();
     names.forEach(name => {
       const node = filterTemplate.content.firstElementChild.cloneNode(true);
       const input = node.querySelector('input');
       const label = node.querySelector('.filter-name');
-      const color = state.categories.get(name)?.color || state.events.find(e => e.category === name)?.color || '#64748B';
-      input.checked = state.enabledCategories.has(name);
+      const color = categoryColor(name);
+      input.checked = state.aboveGroups.has(name);
+      node.dataset.categoryName = name.toLocaleLowerCase();
       node.style.setProperty('--chip-color', color);
       node.style.setProperty('--chip-color-deep', `color-mix(in srgb, ${color} 78%, #08111f)`);
       node.style.setProperty('--chip-color-light', `color-mix(in srgb, ${color} 58%, white)`);
       label.textContent = name;
-      input.addEventListener('change', () => {
-        if (input.checked) state.enabledCategories.add(name);
-        else state.enabledCategories.delete(name);
-        if (!state.enabledCategories.has(state.primaryCategory)) {
-          state.primaryCategory = [...state.enabledCategories][0] || null;
-        }
-        buildPrimarySelector();
-        scheduleRender();
-      });
-      filtersEl.appendChild(node);
+      input.addEventListener('change', () => updateAboveGroup(name, input.checked));
+      aboveSetsList.appendChild(node);
+    });
+    const selected = names.filter(name => state.aboveGroups.has(name));
+    aboveSetsSummary.textContent = selected.length ? selected.join(', ') : 'None';
+    aboveSetsCount.textContent = `${selected.length}/${names.length}`;
+    filterAboveSetsMenu(aboveSetsSearch?.value || '');
+  }
+
+  function filterAboveSetsMenu(query) {
+    const normalized = String(query || '').trim().toLocaleLowerCase();
+    aboveSetsList?.querySelectorAll('.filter-chip').forEach(node => {
+      node.hidden = Boolean(normalized) && !node.dataset.categoryName.includes(normalized);
     });
   }
 
-
-  function buildPrimarySelector() {
-    const names = [...new Set(state.events.map(e => e.category))].sort();
-    primaryCategorySelect.replaceChildren();
-    names.forEach(name => {
-      const option = document.createElement('option');
-      option.value = name;
-      option.textContent = name;
-      option.disabled = !state.enabledCategories.has(name);
-      primaryCategorySelect.appendChild(option);
-    });
-    if (!state.primaryCategory || !names.includes(state.primaryCategory)) {
-      state.primaryCategory = names.find(name => state.enabledCategories.has(name)) || names[0] || null;
-    }
-    primaryCategorySelect.value = state.primaryCategory || '';
+  function closeAboveSetsMenu() {
+    if (!aboveSetsMenu || aboveSetsMenu.hidden) return;
+    aboveSetsMenu.hidden = true;
+    aboveSetsButton?.setAttribute('aria-expanded', 'false');
   }
+
 
   function navigationBounds() {
     const dataSpan = Math.max(0.0001, state.maxTime - state.minTime);
@@ -601,21 +745,20 @@
       0.25,
       Math.min(20, dataSpan * 0.03)
     );
-    // Convert a small, visually consistent amount of screen clearance into
-    // timeline units. This prevents broad views from gaining decades of empty
-    // space while still leaving room after the final event marker.
+    // Reserve enough timeline distance after the final anchor for the longest
+    // event label to clear the right edge and the zoom rail completely. The
+    // margin scales with the current zoom so it remains a consistent amount of
+    // screen space rather than collapsing to only a few years.
     const viewportWidth = Math.max(
       1,
       viewport.clientWidth || window.innerWidth || 1
     );
     const yearsPerPixel = visibleSpan / viewportWidth;
-    const pixelClearance = Math.min(3, yearsPerPixel * 48);
-    const dataClearance = Math.min(2, dataSpan * 0.005);
+    const trailingPixels = Math.min(620, Math.max(440, viewportWidth * 0.52));
+    const pixelClearance = yearsPerPixel * trailingPixels;
+    const dataClearance = dataSpan * 0.01;
 
-    const rightMargin = Math.max(
-      pixelClearance,
-      dataClearance
-    );
+    const rightMargin = Math.max(pixelClearance, dataClearance);
 
 
     return {
@@ -774,6 +917,7 @@
   }
 
   function onPointerDown(event) {
+    if (isInsideZoomRail(event.clientX, event.clientY)) return;
     if (detailPanel.contains(event.target) || tooltip.contains(event.target) || event.target.closest('a, button, input, select, textarea, [role=\"button\"]')) return;
     viewport.setPointerCapture(event.pointerId);
     state.pointerMap.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -949,6 +1093,14 @@
     laneCaptionTop.innerHTML = '';
     laneCaptionBottom.hidden = true;
     laneCaptionBottom.innerHTML = '';
+  }
+
+
+  function isInsideZoomRail(clientX, clientY) {
+    const rect = zoomRail?.getBoundingClientRect();
+    return Boolean(rect &&
+      clientX >= rect.left && clientX <= rect.right &&
+      clientY >= rect.top && clientY <= rect.bottom);
   }
 
   function updateYearCursor(event) {
@@ -1134,8 +1286,8 @@
       return anchor >= state.viewStart - labelOverscanYears && anchor <= state.viewEnd + labelOverscanYears;
     });
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
-    const above = visible.filter(e => e.category === state.primaryCategory);
-    const below = visible.filter(e => e.category !== state.primaryCategory);
+    const above = visible.filter(e => state.aboveGroups.has(e.category));
+    const below = visible.filter(e => !state.aboveGroups.has(e.category));
     const abovePoints = above.filter(e => e.elementType !== 'Period');
     const belowPoints = below.filter(e => e.elementType !== 'Period');
     const abovePeriods = above.filter(e => e.elementType === 'Period' && e.end != null);
@@ -1155,8 +1307,7 @@
   }
 
   function resolvePosition(event) {
-    if (event.position && event.position !== 'Auto') return event.position;
-    return event.role === 'Core' ? 'Above' : 'Below';
+    return state.aboveGroups.has(event.category) ? 'Above' : 'Below';
   }
 
   function drawPointRows(events, width, axisY, isAbove, threshold) {
@@ -1192,29 +1343,13 @@
       const thumbnailAllowance = timelinePreview ? 33 : 0;
       const measuredLabelWidth = Math.ceil(ctx.measureText(event.headline).width + 20 + thumbnailAllowance);
       ctx.restore();
-      const edgePadding = 8;
-
-      // The zoom rail overlays the right side of the timeline. Treat the area
-      // beneath it as unavailable so labels remain fully readable when zoomed out.
-      const viewportRect = viewport.getBoundingClientRect();
-      const zoomRailRect = zoomRail?.getBoundingClientRect();
-      const zoomRailLeft = zoomRailRect
-        ? zoomRailRect.left - viewportRect.left
-        : width;
-
-      const usableRight = Math.max(
-        edgePadding + 96,
-        Math.min(width - edgePadding, zoomRailLeft - 10)
-      );
-      const usableWidth = Math.max(96, usableRight - edgePadding);
-
-      // Labels may shift to remain readable near an edge, but they must not
-      // remain pinned onscreen after their actual event marker has left view.
-      if (x < edgePadding || x > usableRight) return;
-
+      // The zoom rail is a visual and interaction overlay, not a clipping
+      // boundary. Event labels continue beneath its frosted surface and are
+      // clipped only by the timeline viewport itself. This lets a label remain
+      // partially readable as it naturally moves off either screen edge.
       const labelWidth = Math.min(
         360,
-        Math.max(96, Math.min(measuredLabelWidth, usableWidth))
+        Math.max(96, Math.min(measuredLabelWidth, Math.max(96, width)))
       );
 
       const visualTheme = document.documentElement.dataset.visualTheme || 'gradient';
@@ -1231,7 +1366,10 @@
       const labelLeft = isMetroTheme ? leaderX - 1 : leaderX;
       const labelRight = labelLeft + labelWidth;
 
-      if (labelLeft < edgePadding || labelRight > usableRight) return;
+      // Do not cull against the zoom-control footprint or require the whole
+      // label to fit onscreen. The label layer's overflow clipping reveals the
+      // visible portion until the complete block has left the viewport.
+      if (labelRight <= 0 || labelLeft >= width) return;
 
       let lane = 0;
       if (showLabel) {
@@ -1647,6 +1785,7 @@
   }
 
   function onViewportClick(event) {
+    if (isInsideZoomRail(event.clientX, event.clientY)) return;
     if (state.movedDuringDrag) {
       state.movedDuringDrag = false;
       return;
