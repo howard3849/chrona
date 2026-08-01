@@ -1,0 +1,64 @@
+/* Chrona year ruler: desktop vertical, phone horizontal. */
+.year-cursor {
+  position: absolute;
+  z-index: 36;
+  pointer-events: none;
+  overflow: visible !important;
+  border: 0;
+  background: #ffd400;
+}
+.year-cursor[hidden] { display: none; }
+.year-cursor-label,
+.year-cursor-relative {
+  position: absolute;
+  z-index: 2;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: #ffd400 !important;
+  -webkit-text-fill-color: #ffd400 !important;
+  text-shadow: 0 1px 2px var(--bg);
+}
+.timeline-viewport:not(.is-phone-vertical) .year-cursor {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  height: auto;
+}
+.timeline-viewport:not(.is-phone-vertical) .year-cursor-label,
+.timeline-viewport:not(.is-phone-vertical) .year-cursor-relative {
+  top: 8px;
+  bottom: auto;
+}
+.timeline-viewport:not(.is-phone-vertical) .year-cursor-label {
+  right: 7px;
+  transform: translateX(-100%);
+}
+.timeline-viewport:not(.is-phone-vertical) .year-cursor-relative { left: 7px; }
+
+/* Phone: labels sit at the right endpoint, year above and relative age below. */
+.timeline-viewport.is-phone-vertical .year-cursor {
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 2px;
+}
+.timeline-viewport.is-phone-vertical .year-cursor-label,
+.timeline-viewport.is-phone-vertical .year-cursor-relative {
+  left: auto;
+  right: 8px;
+  transform: none;
+  text-align: right;
+}
+.timeline-viewport.is-phone-vertical .year-cursor-label {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+.timeline-viewport.is-phone-vertical .year-cursor-relative {
+  top: calc(100% + 4px);
+  bottom: auto;
+}

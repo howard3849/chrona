@@ -8,3 +8,5 @@ Changes from v1.34:
 
 
 v1.36: Reset now clears stale pointer/drag state and window-level pointer-end fallbacks keep hover tooltips active after reset.
+
+Chrona v2.1.0 refactors phone periods, search, and year ruler into dedicated component modules and stylesheets.

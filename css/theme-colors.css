@@ -1,0 +1,79 @@
+/* Chrona theme color ownership.
+   This file is the authoritative light/dark text-color layer. */
+
+/* Normal interface text follows the active theme tokens. */
+:root:not([data-theme="dark"]) body,
+:root:not([data-theme="dark"]) .app-header,
+:root:not([data-theme="dark"]) .toolbar,
+:root:not([data-theme="dark"]) .header-actions,
+:root:not([data-theme="dark"]) .settings-panel,
+:root:not([data-theme="dark"]) .settings-sheet,
+:root:not([data-theme="dark"]) .search-control,
+:root:not([data-theme="dark"]) .search-results,
+:root:not([data-theme="dark"]) .detail-panel,
+:root:not([data-theme="dark"]) .tooltip {
+  color: var(--text);
+  -webkit-text-fill-color: currentColor;
+}
+
+:root:not([data-theme="dark"]) button,
+:root:not([data-theme="dark"]) input,
+:root:not([data-theme="dark"]) select,
+:root:not([data-theme="dark"]) textarea,
+:root:not([data-theme="dark"]) option,
+:root:not([data-theme="dark"]) label,
+:root:not([data-theme="dark"]) .primary-set,
+:root:not([data-theme="dark"]) .brand-block .subtitle,
+:root:not([data-theme="dark"]) .search-control #searchResultCount,
+:root:not([data-theme="dark"]) .detail-panel h2,
+:root:not([data-theme="dark"]) .detail-panel .detail-body,
+:root:not([data-theme="dark"]) .detail-panel .detail-date,
+:root:not([data-theme="dark"]) .detail-panel .detail-meta,
+:root:not([data-theme="dark"]) .detail-panel .detail-fine-print,
+:root:not([data-theme="dark"]) .tooltip strong,
+:root:not([data-theme="dark"]) .tooltip .body,
+:root:not([data-theme="dark"]) .tooltip .date {
+  color: var(--text);
+  -webkit-text-fill-color: currentColor;
+}
+
+:root:not([data-theme="dark"]) .app-header p,
+:root:not([data-theme="dark"]) .detail-panel .detail-meta,
+:root:not([data-theme="dark"]) .detail-panel .detail-fine-print,
+:root:not([data-theme="dark"]) .status,
+:root:not([data-theme="dark"]) .muted {
+  color: var(--text-muted);
+  -webkit-text-fill-color: currentColor;
+}
+
+/* Flat and Metro cards use light surfaces, so their text must be dark/colored. */
+:root:not([data-theme="dark"])[data-visual-theme="flat"] .event-label,
+:root:not([data-theme="dark"])[data-visual-theme="flat"] .event-label-text,
+:root:not([data-theme="dark"])[data-visual-theme="flat"] .period-label,
+:root:not([data-theme="dark"])[data-visual-theme="flat"] .period-label-text,
+:root:not([data-theme="dark"])[data-visual-theme="metro"] .event-label,
+:root:not([data-theme="dark"])[data-visual-theme="metro"] .event-label-text,
+:root:not([data-theme="dark"])[data-visual-theme="metro"] .period-label,
+:root:not([data-theme="dark"])[data-visual-theme="metro"] .period-label-text {
+  color: var(--event-color, var(--text));
+  -webkit-text-fill-color: currentColor;
+  text-shadow: none;
+}
+
+/* Gradient and AI cards intentionally use dark/colored surfaces and retain white text. */
+:root:not([data-theme="dark"])[data-visual-theme="gradient"] .event-label,
+:root:not([data-theme="dark"])[data-visual-theme="gradient"] .event-label-text,
+:root:not([data-theme="dark"])[data-visual-theme="gradient"] .period-label,
+:root:not([data-theme="dark"])[data-visual-theme="gradient"] .period-label-text,
+:root:not([data-theme="dark"])[data-visual-theme="ai"] .event-label,
+:root:not([data-theme="dark"])[data-visual-theme="ai"] .event-label-text {
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+}
+
+/* Phone SVG period labels use their category color on the opaque light surface. */
+:root:not([data-theme="dark"]) .timeline-viewport.is-phone-vertical .mobile-period-text {
+  color: var(--event-color, var(--text));
+  -webkit-text-fill-color: currentColor;
+  background: var(--surface-solid);
+}

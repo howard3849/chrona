@@ -1,0 +1,102 @@
+/* Chrona phone period component.
+   SVG owns the neon frame. HTML owns the opaque, inset text surface. */
+.timeline-viewport.is-phone-vertical .mobile-period-rail {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--event-color, var(--text));
+  -webkit-text-fill-color: currentColor;
+  text-shadow: none;
+  cursor: pointer;
+  z-index: 24;
+}
+.timeline-viewport.is-phone-vertical .mobile-period-rail::before,
+.timeline-viewport.is-phone-vertical .mobile-period-rail::after {
+  content: none;
+  display: none;
+}
+.timeline-viewport.is-phone-vertical .mobile-period-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+}
+.timeline-viewport.is-phone-vertical .mobile-period-frame-path {
+  display: block;
+  fill: none;
+  stroke-width: 3;
+  opacity: 1;
+  visibility: visible;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--event-color) 72%, transparent));
+}
+.timeline-viewport.is-phone-vertical .mobile-period-text {
+  position: absolute;
+  z-index: 2;
+  top: 11px;
+  right: 5px;
+  bottom: 13px;
+  left: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 2px 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: var(--surface-solid) !important;
+  box-shadow: none;
+  color: var(--event-color, var(--text)) !important;
+  -webkit-text-fill-color: var(--event-color, var(--text)) !important;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.1;
+  text-align: center;
+  pointer-events: none;
+}
+.timeline-viewport.is-phone-vertical .mobile-period-rail.continues-before .mobile-period-text { top: 4px; }
+.timeline-viewport.is-phone-vertical .mobile-period-rail.continues-after .mobile-period-text { bottom: 4px; }
+.timeline-viewport.is-phone-vertical .mobile-period-rail.is-selected { z-index: 28; }
+
+/* AI theme does not own the phone-period text or frame. */
+:root[data-visual-theme="ai"] .timeline-viewport.is-phone-vertical .mobile-period-frame,
+:root[data-visual-theme="ai"] .timeline-viewport.is-phone-vertical .mobile-period-frame-path {
+  display: block;
+  opacity: 1;
+  visibility: visible;
+}
+:root[data-visual-theme="ai"] .timeline-viewport.is-phone-vertical .mobile-period-text {
+  background: var(--surface-solid) !important;
+  color: var(--event-color, var(--text)) !important;
+  -webkit-text-fill-color: var(--event-color, var(--text)) !important;
+}
+
+html[data-preview-size="phone"] .timeline-viewport.is-phone-vertical .mobile-period-rail,
+html[data-preview-size="phone"] .timeline-viewport.is-phone-vertical .mobile-period-frame,
+html[data-preview-size="phone"] .timeline-viewport.is-phone-vertical .mobile-period-text {
+  box-sizing: border-box;
+}

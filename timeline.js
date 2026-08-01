@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '2.0.63';
+  const APP_VERSION = '2.1.11';
 
   const DEFAULT_SHEET_STORAGE_KEY = 'chrona-default-sheet-url';
   const DEFAULT_EVENT_GID = 681184261;
@@ -64,6 +64,7 @@
   const searchPrevious = document.getElementById('searchPrevious');
   const searchNext = document.getElementById('searchNext');
   const searchResultCount = document.getElementById('searchResultCount');
+  const searchClose = document.getElementById('searchClose');
   const appHeader = document.querySelector('.app-header');
   const detailPanel = document.getElementById('detailPanel');
   const detailContent = document.getElementById('detailContent');
@@ -755,6 +756,14 @@
     event.stopPropagation();
     moveToSearchResult(1);
   });
+  if (searchClose) {
+    searchClose.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSearchControl();
+      searchToggle?.focus({ preventScroll: true });
+    });
+  }
   viewport.addEventListener('click', onViewportClick);
 
   const viewportDebugButtons = [...document.querySelectorAll('[data-preview-size]')];
@@ -1904,34 +1913,42 @@
       state.mobileEventPositions.push({ event, y });
 
       ctx.save();
+      const phoneSearchActive = Boolean(state.searchQuery.trim());
+      ctx.globalAlpha = phoneSearchActive && !isActiveSearchResult(event) ? 0.22 : 1;
       ctx.strokeStyle = event.color;
       ctx.fillStyle = event.color;
 
       if (isPeriod) {
-        const periodStartY = event.start < state.viewStart
-          ? 0
-          : yearToY(event.start);
-        const periodEndY = event.end > state.viewEnd
-          ? height
-          : yearToY(event.end);
+        // Preserve the true off-screen endpoints. The rail path uses these
+        // unclamped coordinates to decide whether its top or bottom is open.
+        const periodStartY = yearToY(event.start);
+        const periodEndY = yearToY(event.end);
         const periodLane = periodLaneById.get(event.id) || 0;
         const railX = periodRailStartX + periodLane * (periodRailWidth + periodRailGap);
-        const railTop = Math.max(0, Math.min(periodStartY, periodEndY));
-        const railBottom = Math.min(height, Math.max(periodStartY, periodEndY));
+        const rawRailTop = Math.min(periodStartY, periodEndY);
+        const rawRailBottom = Math.max(periodStartY, periodEndY);
+        const railTop = Math.max(0, rawRailTop);
+        const railBottom = Math.min(height, rawRailBottom);
         const railHeight = Math.max(18, railBottom - railTop);
         const selected = state.selectedPhonePeriodId === event.id;
         ctx.restore();
 
         const rail = document.createElement('button');
         rail.type = 'button';
-        const continuesBefore = event.start < state.viewStart;
-        const continuesAfter = event.end > state.viewEnd;
+        // Boundary shape follows the geometry actually clipped by the phone
+        // viewport. A period is open only when its real endpoint lies beyond
+        // the visible screen; an endpoint exactly on-screen remains closed.
+        const continuesBefore = rawRailTop < -0.5;
+        const continuesAfter = rawRailBottom > height + 0.5;
         rail.className = [
           'event-label',
           'mobile-period-rail',
           selected ? 'is-selected' : '',
           continuesBefore ? 'continues-before' : '',
-          continuesAfter ? 'continues-after' : ''
+          continuesAfter ? 'continues-after' : '',
+          state.searchQuery.trim()
+            ? (isActiveSearchResult(event) ? 'is-search-match' : 'is-search-dim')
+            : ''
         ].filter(Boolean).join(' ');
         rail.dataset.eventId = event.id;
         rail.style.left = `${railX - periodRailWidth / 2}px`;
@@ -2036,7 +2053,10 @@
       card.className = [
         'event-label',
         'mobile-scale-card',
-        isPrimary ? 'mobile-scale-primary' : 'mobile-scale-reference'
+        isPrimary ? 'mobile-scale-primary' : 'mobile-scale-reference',
+        state.searchQuery.trim()
+          ? (isActiveSearchResult(event) ? 'is-search-match' : 'is-search-dim')
+          : ''
       ].filter(Boolean).join(' ');
       card.dataset.eventId = event.id;
       card.style.left = `${cardLeft}px`;
@@ -2348,6 +2368,12 @@
     return !normalized || searchTextForEvent(event).includes(normalized);
   }
 
+  function isActiveSearchResult(event) {
+    if (!state.searchQuery.trim() || !state.searchMatches.length) return false;
+    const active = state.searchMatches[state.searchMatchIndex];
+    return Boolean(active && active.id === event.id);
+  }
+
   function isEraBlock(event) {
     return Number.isFinite(event.end) && event.end > event.start;
   }
@@ -2553,7 +2579,7 @@
       ctx.save();
 
       const hasSearch = Boolean(state.searchQuery.trim());
-      const isSearchMatch = eventMatchesSearch(event);
+      const isSearchMatch = isActiveSearchResult(event);
       ctx.globalAlpha = hasSearch && !isSearchMatch ? 0.22 : 1;
 
       const isSelected = state.selectedEvent?.id === event.id;
