@@ -1,10 +1,22 @@
 (() => {
   'use strict';
 
+  const APP_VERSION = '2.0.63';
+
   const DEFAULT_SHEET_STORAGE_KEY = 'chrona-default-sheet-url';
   const DEFAULT_EVENT_GID = 681184261;
   const DEFAULT_CATEGORY_GID = 1068523108;
+  const DEFAULT_TRANSLATION_GID = 1376603082;
+  const DEFAULT_SETTINGS_GID = 1696716043;
+  const DEFAULT_DICTIONARY_GID = 331215478;
+  const LANGUAGE_STORAGE_KEY = 'chrona-language';
+  const TRANSLATION_CACHE_KEY = 'chrona-translation-cache-v1';
   const DEFAULT_AXIS_Y_RATIO = 0.47;
+  // Desktop timelines can require substantial vertical travel when several
+  // point and period lanes sit on the same side of the axis. Keep the axis
+  // movable beyond the viewport so those off-screen rows can be brought into view.
+  const DESKTOP_AXIS_MIN_RATIO = -1.5;
+  const DESKTOP_AXIS_MAX_RATIO = 2.5;
   const MIN_VISIBLE_YEARS = 0.08;
   const MAX_VISIBLE_YEARS = 12000;
 
@@ -25,7 +37,8 @@
   const aboveSetsCount = document.getElementById('aboveSetsCount');
   const aboveSetsSearch = document.getElementById('aboveSetsSearch');
   const aboveSetsList = document.getElementById('aboveSetsList');
-  const sheetUrlInput = document.getElementById('sheetUrl');
+  const aboveSetsSave = document.getElementById('aboveSetsSave');
+  const sheetUrlInput = document.getElementById('defaultSheetUrl');
   const filterTemplate = document.getElementById('filterTemplate');
   const zoomDial = document.getElementById('zoomDial');
   const zoomRail = document.querySelector('.zoom-rail');
@@ -51,6 +64,7 @@
   const searchPrevious = document.getElementById('searchPrevious');
   const searchNext = document.getElementById('searchNext');
   const searchResultCount = document.getElementById('searchResultCount');
+  const appHeader = document.querySelector('.app-header');
   const detailPanel = document.getElementById('detailPanel');
   const detailContent = document.getElementById('detailContent');
   const detailClose = document.getElementById('detailClose');
@@ -62,12 +76,21 @@
   const laneCaptionBottom = document.getElementById('laneCaptionBottom');
   const yearCursor = document.getElementById('yearCursor');
   const yearCursorLabel = document.getElementById('yearCursorLabel');
+  const yearCursorRelative = document.getElementById('yearCursorRelative');
+  const languageSelect = document.getElementById('languageSelect');
 
   const state = {
     events: [],
     categories: new Map(),
     enabledCategories: new Set(),
     aboveGroups: new Set(),
+    language: localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'en-US',
+    defaultLanguage: 'en-US',
+    availableLanguages: ['en-US', 'zh-TW'],
+    translations: new Map(),
+    dictionary: [],
+    browserTranslationCache: new Map(),
+    browserTranslator: null,
     minTime: 1700,
     maxTime: 2026,
     viewStart: 1700,
@@ -102,10 +125,15 @@
     detailRestoreView: null,
     detailAnchor: null,
     cursorX: null,
+    cursorY: null,
     cursorYear: null,
+    mobileEventPositions: [],
+    selectedPhonePeriodId: null,
+    detailShowOriginal: false,
+    pendingAboveGroups: null,
     viewAnimationRaf: null,
     zoomDialActive: false,
-    axisYRatio: Math.max(0.22, Math.min(0.76, Number(localStorage.getItem('chrona-axis-y-ratio')) || DEFAULT_AXIS_Y_RATIO)),
+    axisYRatio: Math.max(DESKTOP_AXIS_MIN_RATIO, Math.min(DESKTOP_AXIS_MAX_RATIO, Number(localStorage.getItem('chrona-axis-y-ratio')) || DEFAULT_AXIS_Y_RATIO)),
     tooltipToken: 0,
     overviewDragging: false,
     overviewDragMode: null,
@@ -114,6 +142,350 @@
     overviewDragStartViewStart: 0,
     overviewDragStartViewEnd: 0
   };
+
+  const UI_STRINGS = {
+    'en-US': {
+      'app.subtitle': 'Interactive Timeline Explorer',
+      'language.label': 'Language',
+      'actions.reload': 'Reload',
+      'actions.save': 'Save',
+      'actions.useBannerUrl': 'Use banner URL',
+      'actions.saveDefault': 'Save default',
+      'actions.clear': 'Clear',
+      'actions.hide': 'Hide',
+      'actions.show': 'Show',
+      'settings.title': 'Settings',
+      'settings.googleSheet': 'Google Sheet URL',
+      'settings.timeline': 'Timeline',
+      'settings.appearance': 'Appearance',
+      'settings.general': 'General',
+      'settings.advanced': 'Advanced',
+      'settings.version': 'Version',
+      'settings.versionHelp': 'The version increases with every replacement ZIP.',
+      'settings.sheetHelp': 'This default is stored locally on this device. The Sheet URL in the top banner remains temporary unless you save it here.',
+      'settings.subtitle': 'Appearance changes apply immediately.',
+      'settings.defaultSheet': 'Default Google Sheet',
+      'settings.savedBrowser': 'Saved only in this browser',
+      'settings.timelineStyle': 'Timeline style',
+      'settings.colorMode': 'Color mode',
+      'settings.languageHeading': 'Language',
+      'settings.languageHelp': 'English is the source language. Traditional Chinese uses saved Sheet translations first, then the Dictionary tab protects names, brands, and approved terms before browser translation.',
+      'toolbar.aboveSets': 'Primary',
+      'toolbar.visible': 'Visible',
+      'groups.none': 'None',
+      'groups.choose': 'Choose groups',
+      'groups.search': 'Search groups',
+      'search.placeholder': 'Event, group, or year',
+      'sheet.placeholder': 'Paste a Google Sheet URL',
+      'overview.title': 'Timeline overview',
+      'overview.help': 'Drag window to pan · drag edges to zoom',
+      'details.noDescription': 'No additional description is available.',
+      'details.aboveSet': 'Above set',
+      'details.referenceSet': 'Reference set',
+      'details.machineTranslationDisclosure': 'This card includes AI or machine-translated text. Translation may contain errors.',
+      'details.showOriginal': 'Show original',
+      'details.showTranslation': 'Show translation',
+      'details.mediaDisclosure': 'Media links and credits are provided by the timeline record.',
+      'details.source': 'Source',
+      'details.mediaSource': 'Media',
+      'details.duration': 'Duration',
+      'details.event': 'Event',
+      'details.period': 'Period',
+      'status.loading': 'Loading timeline data…',
+      'status.records': '{count} timeline records loaded — {source}.',
+      'status.translationFallback': 'Some Traditional Chinese text is unavailable; original English is shown.'
+    },
+    'zh-TW': {
+      'app.subtitle': '互動式時間軸瀏覽器',
+      'language.label': '語言',
+      'actions.reload': '重新載入',
+      'actions.save': '儲存',
+      'actions.useBannerUrl': '使用上方網址',
+      'actions.saveDefault': '儲存預設值',
+      'actions.clear': '清除',
+      'actions.hide': '隱藏',
+      'actions.show': '顯示',
+      'settings.title': '設定',
+      'settings.googleSheet': 'Google 試算表網址',
+      'settings.timeline': '時間軸',
+      'settings.appearance': '外觀',
+      'settings.general': '一般',
+      'settings.advanced': '進階',
+      'settings.version': '版本',
+      'settings.versionHelp': '每次產生替換 ZIP 時，版本號都會增加。',
+      'settings.sheetHelp': '此預設值只會儲存在這台裝置。本頁上方的試算表網址仍是暫時使用，除非您在此儲存。',
+      'settings.subtitle': '外觀變更會立即套用。',
+      'settings.defaultSheet': '預設 Google 試算表',
+      'settings.savedBrowser': '只儲存在此瀏覽器',
+      'settings.timelineStyle': '時間軸樣式',
+      'settings.colorMode': '色彩模式',
+      'settings.languageHeading': '語言',
+      'settings.languageHelp': '英文是原始語言。繁體中文會優先使用試算表中已儲存的翻譯；若需瀏覽器翻譯，Dictionary 分頁會先保護姓名、品牌及核准用語。',
+      'toolbar.aboveSets': '主要',
+      'toolbar.visible': '顯示',
+      'groups.none': '無',
+      'groups.choose': '選擇群組',
+      'groups.search': '搜尋群組',
+      'search.placeholder': '事件、群組或年份',
+      'sheet.placeholder': '貼上 Google 試算表網址',
+      'overview.title': '時間軸總覽',
+      'overview.help': '拖曳視窗平移 · 拖曳邊緣縮放',
+      'details.noDescription': '沒有其他說明。',
+      'details.aboveSet': '上方群組',
+      'details.referenceSet': '參考群組',
+      'details.machineTranslationDisclosure': '此卡片包含 AI 或機器翻譯文字，翻譯內容可能有誤。',
+      'details.showOriginal': '顯示原文',
+      'details.showTranslation': '顯示翻譯',
+      'details.mediaDisclosure': '媒體連結與出處由時間軸資料提供。',
+      'details.source': '來源',
+      'details.mediaSource': '媒體',
+      'details.duration': '期間',
+      'details.event': '事件',
+      'details.period': '時期',
+      'status.loading': '正在載入時間軸資料…',
+      'status.records': '已載入 {count} 筆時間軸資料 — {source}。',
+      'status.translationFallback': '部分繁體中文尚無翻譯，已顯示原始英文。'
+    }
+  };
+
+  function t(key, variables = {}) {
+    const table = UI_STRINGS[state.language] || UI_STRINGS['en-US'];
+    let value = table[key] ?? UI_STRINGS['en-US'][key] ?? key;
+    Object.entries(variables).forEach(([name, replacement]) => {
+      value = value.replaceAll(`{${name}}`, String(replacement));
+    });
+    return value;
+  }
+
+  function loadBrowserTranslationCache() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(TRANSLATION_CACHE_KEY) || '{}');
+      state.browserTranslationCache = new Map(Object.entries(saved));
+    } catch (_) {
+      state.browserTranslationCache = new Map();
+    }
+  }
+
+  function saveBrowserTranslationCache() {
+    const entries = [...state.browserTranslationCache.entries()].slice(-500);
+    localStorage.setItem(TRANSLATION_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
+  }
+
+  function applyInterfaceLanguage() {
+    document.documentElement.lang = state.language;
+    if (languageSelect) languageSelect.value = state.language;
+    const appVersion = document.getElementById('appVersion');
+    if (appVersion) appVersion.textContent = `v${APP_VERSION}`;
+    document.querySelectorAll('[data-i18n]').forEach(node => {
+      node.textContent = t(node.dataset.i18n);
+    });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(node => {
+      node.placeholder = t(node.dataset.i18nPlaceholder);
+    });
+    if (aboveSetsSearch) aboveSetsSearch.placeholder = t('groups.search');
+  }
+
+  function translationMapKey(entityId, language, field) {
+    return `${language}::${entityId}::${field}`;
+  }
+
+  function loadTranslations(rows) {
+    state.translations.clear();
+    rows.forEach(row => {
+      const entityId = String(row['Entity ID'] || row['Event ID'] || '').trim();
+      const language = String(row.Language || '').trim();
+      const field = String(row.Field || '').trim();
+      const translation = String(row.Translation || '').trim();
+      if (!entityId || !language || !field || !translation || translation.startsWith('#')) return;
+      state.translations.set(translationMapKey(entityId, language, field), {
+        translation: sanitizeTranslationArtifacts(translation),
+        sourceText: String(row['Source Text'] || ''),
+        status: String(row.Status || 'machine').toLowerCase()
+      });
+    });
+  }
+
+
+  function loadDictionary(rows) {
+    state.dictionary = rows
+      .map(row => ({
+        term: String(row.Term || '').trim(),
+        language: String(row.Language || '').trim(),
+        displayAs: String(row['Display As'] || row.DisplayAs || '').trim(),
+        mode: String(row.Mode || 'protect').trim().toLowerCase()
+      }))
+      .filter(entry => entry.term && entry.displayAs && (!entry.language || entry.language === state.language || entry.language === 'zh-TW'))
+      .sort((a, b) => b.term.length - a.term.length);
+  }
+
+  function protectDictionaryTerms(sourceText) {
+    let protectedText = String(sourceText || '');
+    const replacements = [];
+    const entries = state.dictionary.filter(entry => entry.language === state.language || entry.language === 'zh-TW');
+    entries.forEach(entry => {
+      const escaped = entry.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`\\b${escaped}\\b`, 'gi');
+      protectedText = protectedText.replace(pattern, match => {
+        const token = `CHRONATERM${replacements.length}TOKEN`;
+        replacements.push({ token, displayAs: entry.displayAs, original: match });
+        return token;
+      });
+    });
+    return { protectedText, replacements };
+  }
+
+  function sanitizeTranslationArtifacts(value, replacements = []) {
+    let cleaned = String(value || '');
+
+    replacements.forEach(({ token, displayAs }, index) => {
+      const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      cleaned = cleaned.replace(new RegExp(escapedToken, 'gi'), displayAs);
+
+      // Chrome's Translator may change token casing or add punctuation/spaces.
+      cleaned = cleaned.replace(
+        new RegExp(`chronaterm\\s*\\(?\\s*${index}\\s*\\)?\\s*token`, 'gi'),
+        displayAs
+      );
+    });
+
+    // Never expose an unresolved internal token to the user.
+    cleaned = cleaned.replace(
+      /chronaterm\s*\(?\s*\d+\s*\)?\s*token/gi,
+      ''
+    );
+
+    return cleaned
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s+([，。！？；：,.!?;:])/g, '$1')
+      .trim();
+  }
+
+  function restoreDictionaryTerms(translatedText, replacements) {
+    return sanitizeTranslationArtifacts(translatedText, replacements);
+  }
+
+  function loadDatasetSettings(rows) {
+    const settings = Object.fromEntries(rows.map(row => [String(row.Setting || '').trim(), String(row.Value || '').trim()]));
+    state.defaultLanguage = settings.default_language || 'en-US';
+    state.availableLanguages = (settings.available_languages || 'en-US,zh-TW').split(',').map(value => value.trim()).filter(Boolean);
+    if (!state.availableLanguages.includes(state.language)) state.language = state.defaultLanguage;
+  }
+
+  function savedTranslation(entityId, field, sourceText) {
+    if (state.language === state.defaultLanguage) return '';
+    const record = state.translations.get(translationMapKey(entityId, state.language, field));
+    if (!record) return '';
+    if (record.sourceText && sourceText && record.sourceText !== sourceText && record.status !== 'approved') return '';
+    return sanitizeTranslationArtifacts(record.translation);
+  }
+
+  function groupDisplayName(groupName) {
+    return savedTranslation(`GROUP:${groupName}`, 'name', groupName) || groupName;
+  }
+
+  function localizedDisplayDate(event) {
+    if (state.language !== 'zh-TW') return event.sourceDisplayDate || '';
+    const year = event.sourceYear;
+    const month = event.sourceMonth;
+    const day = event.sourceDay;
+    const endYear = event.sourceEndYear;
+    const endMonth = event.sourceEndMonth;
+    const endDay = event.sourceEndDay;
+    if (!year) return event.sourceDisplayDate || '';
+    const start = `${year}年${month ? `${Number(month)}月` : ''}${day ? `${Number(day)}日` : ''}`;
+    if (!endYear) return start;
+    const end = `${endYear}年${endMonth ? `${Number(endMonth)}月` : ''}${endDay ? `${Number(endDay)}日` : ''}`;
+    return `${start}－${end}`;
+  }
+
+  async function createBrowserTranslator() {
+    if (state.browserTranslator || state.language !== 'zh-TW') return state.browserTranslator;
+    const API = globalThis.Translator;
+    if (!API?.create) return null;
+    for (const targetLanguage of ['zh-Hant', 'zh-TW']) {
+      try {
+        const availability = await API.availability?.({ sourceLanguage: 'en', targetLanguage });
+        if (availability === 'unavailable') continue;
+        state.browserTranslator = await API.create({ sourceLanguage: 'en', targetLanguage });
+        return state.browserTranslator;
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  async function browserTranslate(sourceText) {
+    const text = String(sourceText || '').trim();
+    if (!text || state.language !== 'zh-TW') return '';
+    const cacheKey = `en>zh-TW::dictionary-v1::${text}`;
+    if (state.browserTranslationCache.has(cacheKey)) {
+      const cached = sanitizeTranslationArtifacts(state.browserTranslationCache.get(cacheKey));
+      if (cached) state.browserTranslationCache.set(cacheKey, cached);
+      return cached;
+    }
+    const translator = await createBrowserTranslator();
+    if (!translator?.translate) return '';
+    const { protectedText, replacements } = protectDictionaryTerms(text);
+    try {
+      const translated = await translator.translate(protectedText);
+      const restored = restoreDictionaryTerms(translated, replacements);
+      if (restored) {
+        state.browserTranslationCache.set(cacheKey, restored);
+        saveBrowserTranslationCache();
+      }
+      return restored || '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function applyLanguageToEvents() {
+    state.events.forEach(event => {
+      event.headline = savedTranslation(event.id, 'headline', event.sourceHeadline) || event.sourceHeadline;
+      event.text = savedTranslation(event.id, 'text', event.sourceText) || event.sourceText;
+      event.mediaCaption = savedTranslation(event.id, 'mediaCaption', event.sourceMediaCaption) || event.sourceMediaCaption;
+      event.categoryLabel = groupDisplayName(event.category);
+      event.displayDate = localizedDisplayDate(event);
+    });
+  }
+
+  async function translateMissingEvents() {
+    if (state.language !== 'zh-TW') return;
+    const translator = await createBrowserTranslator();
+    if (!translator) return;
+    let changed = false;
+    for (const event of state.events) {
+      for (const [field, sourceField] of [['headline', 'sourceHeadline'], ['text', 'sourceText'], ['mediaCaption', 'sourceMediaCaption']]) {
+        if (!event[sourceField] || savedTranslation(event.id, field, event[sourceField])) continue;
+        const translated = await browserTranslate(event[sourceField]);
+        if (translated) { event[field] = translated; changed = true; }
+      }
+      event.categoryLabel = groupDisplayName(event.category);
+      if (changed) scheduleRender();
+    }
+    if (changed) {
+      buildFilters();
+      buildAboveSetsMenu();
+      if (!detailPanel.hidden && state.selectedEvent) detailContent.innerHTML = detailMarkup(state.selectedEvent);
+    }
+  }
+
+  function setLanguage(language, translateMissing = true) {
+    state.detailShowOriginal = false;
+    state.language = state.availableLanguages.includes(language) ? language : state.defaultLanguage;
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, state.language);
+    applyInterfaceLanguage();
+    applyLanguageToEvents();
+    buildFilters();
+    buildAboveSetsMenu();
+    updateSearchResults();
+    if (!detailPanel.hidden && state.selectedEvent) detailContent.innerHTML = detailMarkup(state.selectedEvent);
+    scheduleRender();
+    if (translateMissing) translateMissingEvents();
+  }
+
+  loadBrowserTranslationCache();
+  applyInterfaceLanguage();
+  languageSelect?.addEventListener('change', () => setLanguage(languageSelect.value));
 
   try {
     const savedAboveGroups = JSON.parse(localStorage.getItem('chrona-above-groups') || '[]');
@@ -127,8 +499,7 @@
   const failedTimelineThumbnails = new Set();
 
   const savedDefaultSheetUrl = localStorage.getItem(DEFAULT_SHEET_STORAGE_KEY) || '';
-  sheetUrlInput.value = savedDefaultSheetUrl;
-  defaultSheetUrlInput.value = savedDefaultSheetUrl;
+  if (sheetUrlInput) sheetUrlInput.value = savedDefaultSheetUrl;
 
   const savedTheme = localStorage.getItem('timeline-theme') || 'auto';
   const savedVisualTheme = localStorage.getItem('chrona-visual-theme') || 'gradient';
@@ -139,32 +510,23 @@
   settingsToggle.addEventListener('click', () => toggleSettings());
   settingsClose.addEventListener('click', closeSettings);
   settingsBackdrop.addEventListener('click', closeSettings);
-  useCurrentSheetUrlButton.addEventListener('click', () => {
-    defaultSheetUrlInput.value = sheetUrlInput.value.trim();
-    defaultSheetStatus.textContent = defaultSheetUrlInput.value ? 'Banner URL copied. Select Save default to keep it.' : 'The banner URL is empty.';
-  });
-  saveDefaultSheetUrlButton.addEventListener('click', () => {
-    const value = defaultSheetUrlInput.value.trim();
+  saveDefaultSheetUrlButton?.addEventListener('click', async () => {
+    const value = sheetUrlInput?.value.trim() || '';
     if (!value) {
-      defaultSheetStatus.textContent = 'Enter a Google Sheet URL first.';
-      defaultSheetUrlInput.focus();
+      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '請輸入 Google 試算表網址。' : 'Enter a Google Sheet URL.';
+      sheetUrlInput?.focus();
       return;
     }
     try {
       parseSheetSource(value);
       localStorage.setItem(DEFAULT_SHEET_STORAGE_KEY, value);
-      defaultSheetUrlInput.value = value;
-      sheetUrlInput.value = value;
-      defaultSheetStatus.textContent = 'Default saved and copied to the banner. Select Reload to load it.';
+      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '已儲存，正在載入…' : 'Saved. Loading…';
+      await loadTimeline();
+      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '已儲存並載入。' : 'Saved and loaded.';
     } catch (error) {
       defaultSheetStatus.textContent = error.message;
-      defaultSheetUrlInput.focus();
+      sheetUrlInput?.focus();
     }
-  });
-  clearDefaultSheetUrlButton.addEventListener('click', () => {
-    localStorage.removeItem(DEFAULT_SHEET_STORAGE_KEY);
-    defaultSheetUrlInput.value = '';
-    defaultSheetStatus.textContent = 'Saved default cleared. The current banner URL was not changed.';
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeSettings(); closeAboveSetsMenu(); } });
   systemTheme.addEventListener?.('change', () => {
@@ -173,7 +535,7 @@
     }
   });
 
-  reloadButton.addEventListener('click', () => {
+  reloadButton?.addEventListener('click', () => {
     loadTimeline();
     closeSheetControl();
   });
@@ -213,13 +575,16 @@
   function positionAboveSetsMenu() {
     if (!aboveSetsMenu || aboveSetsMenu.hidden || !aboveSetsButton) return;
     const buttonRect = aboveSetsButton.getBoundingClientRect();
-    const menuWidth = Math.min(360, Math.max(260, window.innerWidth - 24));
-    const left = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, buttonRect.left));
+    const preferred = Number(aboveSetsMenu.dataset.preferredWidth) || 180;
+    const menuWidth = Math.min(preferred, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, buttonRect.left));
     aboveSetsMenu.style.width = `${menuWidth}px`;
     aboveSetsMenu.style.left = `${left}px`;
     aboveSetsMenu.style.right = 'auto';
-    aboveSetsMenu.style.top = `${buttonRect.bottom + 8}px`;
+    aboveSetsMenu.style.top = `${buttonRect.bottom}px`;
   }
+
+  if (aboveSetsMenu && aboveSetsMenu.parentElement !== document.body) document.body.appendChild(aboveSetsMenu);
 
   aboveSetsButton?.addEventListener('click', event => {
     event.stopPropagation();
@@ -227,31 +592,58 @@
     aboveSetsMenu.hidden = !willOpen;
     aboveSetsButton.setAttribute('aria-expanded', String(willOpen));
     if (willOpen) {
-      aboveSetsSearch.value = '';
+      state.pendingAboveGroups = new Set(state.aboveGroups);
+      buildAboveSetsMenu();
       filterAboveSetsMenu('');
       positionAboveSetsMenu();
-      requestAnimationFrame(() => aboveSetsSearch.focus());
+      requestAnimationFrame(() => {
+        aboveSetsList?.querySelector('.above-set-option')?.focus();
+      });
     }
+  });
+  aboveSetsSave?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (state.pendingAboveGroups) {
+      state.aboveGroups = new Set(state.pendingAboveGroups);
+      localStorage.setItem('chrona-above-groups', JSON.stringify([...state.aboveGroups]));
+      state.pendingAboveGroups = null;
+      buildAboveSetsMenu();
+      scheduleRender();
+    }
+    closeAboveSetsMenu();
   });
   window.addEventListener('resize', positionAboveSetsMenu);
   window.addEventListener('scroll', positionAboveSetsMenu, true);
   aboveSetsMenu?.addEventListener('pointerdown', event => event.stopPropagation());
   aboveSetsMenu?.addEventListener('click', event => event.stopPropagation());
-  aboveSetsSearch?.addEventListener('input', () => filterAboveSetsMenu(aboveSetsSearch.value));
   document.addEventListener('pointerdown', event => {
-    if (!aboveSetsMenu?.hidden && !aboveSetsMenu.contains(event.target) && event.target !== aboveSetsButton) {
+    if (!aboveSetsMenu?.hidden && !aboveSetsMenu.contains(event.target) && !aboveSetsButton?.contains(event.target)) {
       closeAboveSetsMenu();
     }
   });
 
   viewport.addEventListener('wheel', onWheel, { passive: false });
   viewport.addEventListener('pointerdown', onPointerDown);
-  detailPanel.addEventListener('pointerdown', event => event.stopPropagation());
-  detailPanel.addEventListener('click', event => event.stopPropagation());
+
+  // The detail pane is an independent scroll/selection surface layered inside
+  // the timeline viewport. Stop its input events before they reach the viewport
+  // handlers, but never prevent their default behavior: the browser still needs
+  // pointer defaults for text selection and wheel/touch defaults for pane scroll.
+  const isolateDetailInteraction = event => event.stopPropagation();
+  detailPanel.addEventListener('pointerdown', isolateDetailInteraction);
+  detailPanel.addEventListener('mousedown', isolateDetailInteraction);
+  detailPanel.addEventListener('touchstart', isolateDetailInteraction, { passive: true });
+  detailPanel.addEventListener('touchmove', isolateDetailInteraction, { passive: true });
+  detailPanel.addEventListener('wheel', isolateDetailInteraction, { passive: true });
+  detailPanel.addEventListener('selectstart', isolateDetailInteraction);
+  detailPanel.addEventListener('click', isolateDetailInteraction);
   document.addEventListener('pointerdown', event => {
     if (!detailPanel.hidden && !detailPanel.contains(event.target)) closeDetails();
   }, true);
   viewport.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('resize', scheduleRender);
+  window.addEventListener('orientationchange', () => setTimeout(scheduleRender, 120));
   viewport.addEventListener('pointerup', onPointerUp);
   viewport.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('pointerup', onGlobalPointerEnd);
@@ -270,35 +662,86 @@
   });
   detailClose.addEventListener('pointerdown', event => { event.preventDefault(); event.stopPropagation(); closeDetails(); });
   detailClose.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); closeDetails(); });
-  function closeSheetControl() {
-    sheetControl.classList.remove('is-open');
-    sheetToggle.setAttribute('aria-expanded', 'false');
-    sheetToggle.setAttribute('aria-label', 'Open Sheet URL');
-  }
-  sheetToggle.addEventListener('click', () => {
-    const opening = !sheetControl.classList.contains('is-open');
-    sheetControl.classList.toggle('is-open', opening);
-    sheetToggle.setAttribute('aria-expanded', String(opening));
-    sheetToggle.setAttribute('aria-label', opening ? 'Close Sheet URL' : 'Open Sheet URL');
-    if (opening) requestAnimationFrame(() => sheetUrlInput.focus());
+
+  detailContent.addEventListener('pointerdown', event => {
+    event.stopPropagation();
   });
 
-  searchToggle.addEventListener('click', () => {
-    const opening = !searchControl.classList.contains('is-open');
-    searchControl.classList.toggle('is-open', opening);
-    searchToggle.setAttribute('aria-expanded', String(opening));
-    searchToggle.setAttribute('aria-label', opening ? 'Close search' : 'Open search');
-    if (opening) requestAnimationFrame(() => searchInput.focus());
+  detailContent.addEventListener('click', event => {
+    const toggle = event.target.closest('[data-detail-language-toggle]');
+    if (!toggle || !state.selectedEvent) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.detailShowOriginal = !state.detailShowOriginal;
+    detailContent.innerHTML = detailMarkup(state.selectedEvent);
   });
-  searchInput.addEventListener('blur', () => {
-    if (!searchInput.value.trim()) {
-      searchControl.classList.remove('is-open');
-      searchToggle.setAttribute('aria-expanded', 'false');
-      searchToggle.setAttribute('aria-label', 'Open search');
+  function closeSheetControl() {
+    sheetControl?.classList.remove('is-open');
+  }
+
+  function closeSearchControl() {
+    searchControl.classList.remove('is-open');
+    searchControl.closest('.search-shell')?.classList.remove('is-open');
+    appHeader?.classList.remove('search-is-open');
+    searchToggle.setAttribute('aria-expanded', 'false');
+    searchToggle.setAttribute('aria-label', 'Open search');
+
+    // Exiting search mode must also remove every visual search state.
+    // Keeping the query in state left non-matches dimmed and the active
+    // match frame enlarged even after the control had retracted.
+    state.searchQuery = '';
+    state.searchMatches = [];
+    state.searchMatchIndex = -1;
+    searchInput.value = '';
+    searchResults.hidden = true;
+    searchResultCount.textContent = '0/0';
+    searchPrevious.disabled = true;
+    searchNext.disabled = true;
+    scheduleRender();
+  }
+
+  function openSearchControl() {
+    searchControl.classList.add('is-open');
+    searchControl.closest('.search-shell')?.classList.add('is-open');
+    appHeader?.classList.add('search-is-open');
+    searchToggle.setAttribute('aria-expanded', 'true');
+    searchToggle.setAttribute('aria-label', 'Close search');
+    updateSearchNavigation();
+    requestAnimationFrame(() => {
+      searchInput.focus({ preventScroll: true });
+      searchInput.select();
+    });
+  }
+
+  searchToggle.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const opening = !searchControl.classList.contains('is-open');
+    if (opening) {
+      openSearchControl();
+    } else {
+      closeSearchControl();
+    }
+  });
+
+  searchControl.addEventListener('pointerdown', event => event.stopPropagation());
+  document.addEventListener('pointerdown', event => {
+    if (
+      searchControl.classList.contains('is-open') &&
+      !searchControl.contains(event.target) &&
+      !searchToggle.contains(event.target)
+    ) {
+      closeSearchControl();
     }
   });
   searchInput.addEventListener('input', onSearchInput);
   searchInput.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeSearchControl();
+      searchToggle.focus({ preventScroll: true });
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       moveToSearchResult(event.shiftKey ? -1 : 1);
@@ -313,6 +756,27 @@
     moveToSearchResult(1);
   });
   viewport.addEventListener('click', onViewportClick);
+
+  const viewportDebugButtons = [...document.querySelectorAll('[data-preview-size]')];
+  function applyPreviewSize(size) {
+    const normalized = ['computer', 'tablet', 'phone'].includes(size) ? size : 'computer';
+    document.documentElement.dataset.previewSize = normalized;
+    viewportDebugButtons.forEach(button => {
+      button.classList.toggle('is-active', button.dataset.previewSize === normalized);
+      button.setAttribute('aria-pressed', String(button.dataset.previewSize === normalized));
+    });
+    localStorage.setItem('chrona.previewSize', normalized);
+    window.dispatchEvent(new Event('resize'));
+    scheduleRender();
+  }
+  viewportDebugButtons.forEach(button => {
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      applyPreviewSize(button.dataset.previewSize);
+    });
+  });
+  applyPreviewSize(localStorage.getItem('chrona.previewSize') || 'computer');
   viewport.addEventListener('keydown', onTimelineKeyDown);
   const overviewNavigator = document.getElementById('overviewNavigator');
   overviewNavigator.addEventListener('pointerdown', onOverviewPointerDown);
@@ -334,7 +798,7 @@
 
 
   function applyVisualTheme(mode, persist = true) {
-    const normalized = ['gradient', 'flat', 'metro'].includes(mode) ? mode : 'gradient';
+    const normalized = ['ai', 'gradient', 'flat', 'metro'].includes(mode) ? mode : 'gradient';
     document.documentElement.dataset.visualTheme = normalized;
     visualThemeButtons.forEach(button => {
       const active = button.dataset.visualThemeValue === normalized;
@@ -582,9 +1046,18 @@
       const category = state.categories.get(categoryName) || { color: '#64748B', position: 'Below', visible: true };
       return {
         id: row['Event ID'] || generateEventId(categoryName, row.Year, row.Headline, index),
+        sourceHeadline: row.Headline || '(Untitled)',
+        sourceText: row.Text || '',
+        sourceDisplayDate: row['Display Date'] || '',
         headline: row.Headline || '(Untitled)',
         text: row.Text || '',
         displayDate: row['Display Date'] || '',
+        sourceYear: row.Year || '',
+        sourceMonth: row.Month || '',
+        sourceDay: row.Day || '',
+        sourceEndYear: row['End Year'] || '',
+        sourceEndMonth: row['End Month'] || '',
+        sourceEndDay: row['End Day'] || '',
         start,
         end,
         category: categoryName,
@@ -594,19 +1067,27 @@
         color: normalizeHex(row.Color, category.color),
         visible: String(row.Visible).toUpperCase() !== 'FALSE' && start != null,
         media: normalizeMediaUrl(row.Media || row['Media URL'] || row.media || row.mediaUrl || ''),
+        sourceMediaCaption: row['Media Caption'] || row.MediaCaption || row.mediaCaption || '',
         mediaCaption: row['Media Caption'] || row.MediaCaption || row.mediaCaption || '',
+        categoryLabel: categoryName,
         mediaCredit: row['Media Credit'] || row.MediaCredit || row.mediaCredit || '',
         thumbnail: normalizeMediaUrl(row['Media Thumbnail'] || row.Thumbnail || row['Thumbnail URL'] || row.mediaThumbnail || row.thumbnail || '')
       };
     }).filter(e => e.visible && e.elementType !== 'Title');
 
     if (!state.events.length) throw new Error('No visible timeline records were found.');
+    applyLanguageToEvents();
     state.enabledCategories = new Set(
       [...new Set(state.events.map(e => e.category))].filter(name => state.categories.get(name)?.visible !== false)
     );
     const groupNames = categoryNames();
+    const groupNameByKey = new Map(groupNames.map(name => [normalizeGroupKey(name), name]));
     const configuredAbove = groupNames.filter(name => String(state.categories.get(name)?.position || '').toLowerCase() === 'above');
-    state.aboveGroups = new Set([...state.aboveGroups].filter(name => groupNames.includes(name)));
+    state.aboveGroups = new Set(
+      [...state.aboveGroups]
+        .map(name => groupNameByKey.get(normalizeGroupKey(name)))
+        .filter(Boolean)
+    );
     if (!state.aboveGroups.size) {
       const eventAbove = groupNames.filter(name => state.events.some(event => event.category === name && String(event.position).toLowerCase() === 'above'));
       state.aboveGroups = new Set(configuredAbove.length ? configuredAbove : eventAbove.slice(0, 1));
@@ -617,37 +1098,96 @@
     state.minTime = Math.min(...times);
     state.maxTime = Math.max(...times);
     resetView();
-    statusEl.textContent = `${state.events.length} timeline records loaded — ${sourceLabel}.`;
+    statusEl.textContent = t('status.records', { count: state.events.length, source: sourceLabel });
   }
 
   async function loadTimeline() {
     statusEl.classList.remove('status-warning');
-    statusEl.textContent = 'Loading timeline data…';
+    statusEl.textContent = t('status.loading');
     const requestedUrl = sheetUrlInput.value.trim();
     if (!requestedUrl) {
+      loadDatasetSettings([]);
+      loadTranslations([]);
+      loadDictionary([]);
       applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'embedded offline snapshot');
-      statusEl.textContent = `${state.events.length} timeline records loaded — enter a Google Sheet URL in the banner or save a browser default in Settings.`;
+      setLanguage(state.language, false);
+      statusEl.textContent = `${state.events.length} timeline records loaded — add a Google Sheet URL in Settings.`;
       return;
     }
+
     try {
-      const source = parseSheetSource(sheetUrlInput.value.trim());
-      const eventResult = await fetchCsvCompatible(source, 'TimelineJS Data', DEFAULT_EVENT_GID);
-      let categoryResult = null;
-      try {
+      const source = parseSheetSource(requestedUrl);
+
+      const eventPromise = fetchCsvCompatible(source, 'TimelineJS Data', DEFAULT_EVENT_GID);
+      const categoryPromise = (async () => {
         try {
-          categoryResult = await fetchCsvCompatible(source, 'Groups', DEFAULT_CATEGORY_GID);
-        } catch (groupsError) {
-          categoryResult = await fetchCsvCompatible(source, 'Categories', DEFAULT_CATEGORY_GID);
+          return await fetchCsvCompatible(source, 'Groups', DEFAULT_CATEGORY_GID);
+        } catch (_) {
+          try {
+            return await fetchCsvCompatible(source, 'Categories', DEFAULT_CATEGORY_GID);
+          } catch (error) {
+            console.warn('Groups tab unavailable; deriving groups from events.', error);
+            return null;
+          }
         }
-      } catch (categoryError) {
-        console.warn('Groups tab unavailable; deriving groups from events.', categoryError);
-      }
+      })();
+
+      const optional = async (sheetName, gid, warning) => {
+        try {
+          return await fetchCsvCompatible(source, sheetName, gid);
+        } catch (error) {
+          console.warn(warning, error);
+          return null;
+        }
+      };
+
+      const [
+        eventResult,
+        categoryResult,
+        translationResult,
+        settingsResult,
+        dictionaryResult
+      ] = await Promise.all([
+        eventPromise,
+        categoryPromise,
+        optional('Translations', DEFAULT_TRANSLATION_GID, 'Translations tab unavailable.'),
+        optional('Dataset Settings', DEFAULT_SETTINGS_GID, 'Dataset Settings tab unavailable.'),
+        optional('Dictionary', DEFAULT_DICTIONARY_GID, 'Dictionary tab unavailable.')
+      ]);
+
       const categoryRows = categoryResult ? rowsToObjects(parseCsv(categoryResult.text)) : [];
-      const sourceLabels = [...new Set([eventResult.sourceLabel, categoryResult?.sourceLabel].filter(Boolean))];
-      applyRows(rowsToObjects(parseCsv(eventResult.text)), categoryRows, `live Google Sheet via ${sourceLabels.join(' + ')}`);
+      loadDatasetSettings(settingsResult ? rowsToObjects(parseCsv(settingsResult.text)) : []);
+      loadTranslations(translationResult ? rowsToObjects(parseCsv(translationResult.text)) : []);
+      loadDictionary(dictionaryResult ? rowsToObjects(parseCsv(dictionaryResult.text)) : []);
+
+      const sourceLabels = [...new Set([
+        eventResult.sourceLabel,
+        categoryResult?.sourceLabel,
+        translationResult?.sourceLabel,
+        dictionaryResult?.sourceLabel
+      ].filter(Boolean))];
+
+      applyRows(
+        rowsToObjects(parseCsv(eventResult.text)),
+        categoryRows,
+        `live Google Sheet via ${sourceLabels.join(' + ')}`
+      );
+
+      // Apply saved translations immediately. Missing machine translations run
+      // afterward and never block the loaded status.
+      setLanguage(state.language, false);
+      statusEl.textContent = t('status.records', {
+        count: state.events.length,
+        source: `live Google Sheet via ${sourceLabels.join(' + ')}`
+      });
+      translateMissingEvents();
     } catch (error) {
       console.warn('Live sheet unavailable; using embedded snapshot.', error);
+      loadDatasetSettings([]);
+      loadTranslations([]);
+      loadDictionary([]);
       applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'embedded offline snapshot');
+      setLanguage(state.language, false);
       statusEl.classList.add('status-warning');
       statusEl.textContent = `Live sheet could not be loaded; showing outdated offline data. ${error.message}`;
     }
@@ -681,17 +1221,32 @@
       button.style.setProperty('--chip-color-deep', `color-mix(in srgb, ${color} 78%, #08111f)`);
       button.style.setProperty('--chip-color-light', `color-mix(in srgb, ${color} 58%, white)`);
       button.setAttribute('aria-pressed', String(state.enabledCategories.has(name)));
-      button.setAttribute('title', `${state.enabledCategories.has(name) ? 'Hide' : 'Show'} ${name}`);
+      const displayName = groupDisplayName(name);
+      button.setAttribute('title', `${state.enabledCategories.has(name) ? t('actions.hide') : t('actions.show')} ${displayName}`);
       button.innerHTML = '<span class="category-quick-name"></span>';
-      button.querySelector('.category-quick-name').textContent = name;
+      button.querySelector('.category-quick-name').textContent = displayName;
       button.addEventListener('click', () => updateCategorySelection(name, !state.enabledCategories.has(name)));
       quickFiltersEl.appendChild(button);
     });
   }
 
+  function normalizeGroupKey(value) {
+    return String(value || '').trim().toLocaleLowerCase();
+  }
+
+  function primaryGroupName(name) {
+    const key = normalizeGroupKey(name);
+    return [...state.aboveGroups].find(group => normalizeGroupKey(group) === key) || null;
+  }
+
+  function isPrimaryCategory(name) {
+    return Boolean(primaryGroupName(name));
+  }
+
   function updateAboveGroup(name, above) {
+    const existing = primaryGroupName(name);
+    if (existing) state.aboveGroups.delete(existing);
     if (above) state.aboveGroups.add(name);
-    else state.aboveGroups.delete(name);
     localStorage.setItem('chrona-above-groups', JSON.stringify([...state.aboveGroups]));
     buildAboveSetsMenu();
     scheduleRender();
@@ -702,28 +1257,53 @@
     aboveSetsList.replaceChildren();
     const names = categoryNames();
     names.forEach(name => {
-      const node = filterTemplate.content.firstElementChild.cloneNode(true);
-      const input = node.querySelector('input');
-      const label = node.querySelector('.filter-name');
-      const color = categoryColor(name);
-      input.checked = state.aboveGroups.has(name);
-      node.dataset.categoryName = name.toLocaleLowerCase();
-      node.style.setProperty('--chip-color', color);
-      node.style.setProperty('--chip-color-deep', `color-mix(in srgb, ${color} 78%, #08111f)`);
-      node.style.setProperty('--chip-color-light', `color-mix(in srgb, ${color} 58%, white)`);
-      label.textContent = name;
-      input.addEventListener('change', () => updateAboveGroup(name, input.checked));
+      const sourceSet = state.pendingAboveGroups || state.aboveGroups;
+      const selected = [...sourceSet].some(group => normalizeGroupKey(group) === normalizeGroupKey(name));
+      const node = document.createElement('button');
+      node.type = 'button';
+      node.className = 'above-set-option';
+      node.setAttribute('role', 'menuitemcheckbox');
+      node.setAttribute('aria-checked', String(selected));
+      node.dataset.categoryName = `${name} ${groupDisplayName(name)}`.toLocaleLowerCase();
+      node.innerHTML = '<span class="filter-name"></span><span class="above-set-check" aria-hidden="true">✓</span>';
+      node.querySelector('.filter-name').textContent = groupDisplayName(name);
+      node.querySelector('.above-set-check').hidden = !selected;
+      node.addEventListener('click', () => {
+        if (!state.pendingAboveGroups) state.pendingAboveGroups = new Set(state.aboveGroups);
+        const existing = [...state.pendingAboveGroups].find(group => normalizeGroupKey(group) === normalizeGroupKey(name));
+        if (existing) state.pendingAboveGroups.delete(existing);
+        else state.pendingAboveGroups.add(name);
+        buildAboveSetsMenu();
+      });
+      node.addEventListener('keydown', event => {
+        const options = [...aboveSetsList.querySelectorAll('.above-set-option:not([hidden])')];
+        const index = options.indexOf(node);
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const delta = event.key === 'ArrowDown' ? 1 : -1;
+          options[(index + delta + options.length) % options.length]?.focus();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          closeAboveSetsMenu();
+          aboveSetsButton?.focus();
+        }
+      });
       aboveSetsList.appendChild(node);
     });
-    const selected = names.filter(name => state.aboveGroups.has(name));
-    aboveSetsSummary.textContent = selected.length ? selected.join(', ') : 'None';
-    aboveSetsCount.textContent = `${selected.length}/${names.length}`;
-    filterAboveSetsMenu(aboveSetsSearch?.value || '');
+    const measure = document.createElement('canvas').getContext('2d');
+    measure.font = '12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
+    const longest = Math.max(...names.map(name => measure.measureText(groupDisplayName(name)).width), 72);
+    // Enough for the longest label, the aligned check column, and compact padding.
+    aboveSetsMenu.dataset.preferredWidth = String(Math.ceil(Math.min(176, Math.max(148, longest + 44))));
+    const selected = names.filter(name => isPrimaryCategory(name));
+    aboveSetsSummary.textContent = selected.length ? selected.map(groupDisplayName).join(', ') : t('groups.none');
+    if (aboveSetsCount) aboveSetsCount.textContent = `${selected.length}/${names.length}`;
+    filterAboveSetsMenu('');
   }
 
   function filterAboveSetsMenu(query) {
     const normalized = String(query || '').trim().toLocaleLowerCase();
-    aboveSetsList?.querySelectorAll('.filter-chip').forEach(node => {
+    aboveSetsList?.querySelectorAll('.above-set-option').forEach(node => {
       node.hidden = Boolean(normalized) && !node.dataset.categoryName.includes(normalized);
     });
   }
@@ -732,8 +1312,16 @@
     if (!aboveSetsMenu || aboveSetsMenu.hidden) return;
     aboveSetsMenu.hidden = true;
     aboveSetsButton?.setAttribute('aria-expanded', 'false');
+    state.pendingAboveGroups = null;
   }
 
+
+  function overviewDataBounds() {
+    return {
+      min: state.minTime,
+      max: Math.max(state.minTime + 0.0001, state.maxTime)
+    };
+  }
 
   function navigationBounds() {
     const dataSpan = Math.max(0.0001, state.maxTime - state.minTime);
@@ -884,6 +1472,26 @@
   }
 
   function onWheel(event) {
+    // Wheel events originating in the floating detail pane belong exclusively
+    // to that pane. Do not zoom, pan, or vertically move the timeline behind it.
+    if (detailPanel.contains(event.target)) return;
+
+    if (isPhoneVerticalMode()) {
+      event.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)));
+      if (event.ctrlKey || event.metaKey) {
+        zoomAt(ratio, Math.exp(event.deltaY * 0.006));
+      } else {
+        const span = state.viewEnd - state.viewStart;
+        const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+        const shift = span * delta / Math.max(1, rect.height);
+        clampView(state.viewStart + shift, state.viewEnd + shift);
+        scheduleRender();
+      }
+      return;
+    }
+
     event.preventDefault();
     const rect = viewport.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
@@ -907,8 +1515,8 @@
     // the existing click-and-drag vertical navigation.
     if (!event.shiftKey && event.deltaY) {
       state.axisYRatio = Math.max(
-        0.22,
-        Math.min(0.76, state.axisYRatio - event.deltaY / Math.max(1, rect.height))
+        DESKTOP_AXIS_MIN_RATIO,
+        Math.min(DESKTOP_AXIS_MAX_RATIO, state.axisYRatio - event.deltaY / Math.max(1, rect.height))
       );
       localStorage.setItem('chrona-axis-y-ratio', String(state.axisYRatio));
     }
@@ -938,8 +1546,13 @@
     state.pinchStartDistance = Math.hypot(b.x - a.x, b.y - a.y);
     state.pinchStartSpan = state.viewEnd - state.viewStart;
     const rect = viewport.getBoundingClientRect();
-    const centerX = (a.x + b.x) / 2;
-    state.pinchAnchorRatio = Math.min(1, Math.max(0, (centerX - rect.left) / rect.width));
+    if (isPhoneVerticalMode()) {
+      const centerY = (a.y + b.y) / 2;
+      state.pinchAnchorRatio = Math.min(1, Math.max(0, (centerY - rect.top) / Math.max(1, rect.height)));
+    } else {
+      const centerX = (a.x + b.x) / 2;
+      state.pinchAnchorRatio = Math.min(1, Math.max(0, (centerX - rect.left) / Math.max(1, rect.width)));
+    }
     state.pinchAnchorTime = state.viewStart + state.pinchStartSpan * state.pinchAnchorRatio;
   }
 
@@ -962,10 +1575,20 @@
       const dx = event.clientX - state.dragStartX;
       const dy = event.clientY - state.dragStartY;
       if (Math.abs(dx) > 2 || Math.abs(dy) > 2) state.movedDuringDrag = true;
-      const shift = -(dx / rect.width) * (state.dragViewEnd - state.dragViewStart);
-      state.viewStart = state.dragViewStart + shift;
-      state.viewEnd = state.dragViewEnd + shift;
-      state.axisYRatio = Math.max(0.22, Math.min(0.76, state.dragAxisRatio + dy / rect.height));
+      const span = state.dragViewEnd - state.dragViewStart;
+      if (isPhoneVerticalMode()) {
+        const shift = -(dy / Math.max(1, rect.height)) * span;
+        state.viewStart = state.dragViewStart + shift;
+        state.viewEnd = state.dragViewEnd + shift;
+      } else {
+        const shift = -(dx / Math.max(1, rect.width)) * span;
+        state.viewStart = state.dragViewStart + shift;
+        state.viewEnd = state.dragViewEnd + shift;
+        state.axisYRatio = Math.max(
+          DESKTOP_AXIS_MIN_RATIO,
+          Math.min(DESKTOP_AXIS_MAX_RATIO, state.dragAxisRatio + dy / Math.max(1, rect.height))
+        );
+      }
       scheduleRender();
     }
   }
@@ -1038,6 +1661,12 @@
     tooltip.style.top = `${top}px`;
   }
 
+  function compactCjkLatinSpacing(value) {
+    return String(value ?? '')
+      .replace(/([\u3400-\u9FFF\uF900-\uFAFF])\s+([A-Za-z0-9])/g, '$1$2')
+      .replace(/([A-Za-z0-9])\s+([\u3400-\u9FFF\uF900-\uFAFF])/g, '$1$2');
+  }
+
   function escapeHtml(value) {
     return String(value).replace(/[&<>'"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch]));
   }
@@ -1055,10 +1684,418 @@
     });
   }
 
+
+  function isPhoneVerticalMode() {
+    return document.documentElement.dataset.previewSize === 'phone' ||
+      window.matchMedia('(max-width: 699px) and (orientation: portrait)').matches;
+  }
+
+  function resetRendererMode() {
+    const mobile = isPhoneVerticalMode();
+    viewport.classList.toggle('is-phone-vertical', mobile);
+    if (!mobile) {
+      viewport.style.removeProperty('--mobile-content-height');
+      labelLayer.style.height = '';
+      canvas.style.height = '';
+      leaderCanvas.style.height = '';
+      state.mobileEventPositions = [];
+      state.cursorY = null;
+    }
+  }
+
+  function mobileShortDate(event) {
+    const startYear = Number(event.sourceYear);
+    const startMonth = Number(event.sourceMonth);
+    const startDay = Number(event.sourceDay);
+    const endYear = Number(event.sourceEndYear);
+    const endMonth = Number(event.sourceEndMonth);
+    const endDay = Number(event.sourceEndDay);
+
+    const formatParts = (year, month, day) => {
+      if (!Number.isFinite(year)) return '';
+      if (year < 0) return `${Math.abs(year)} BCE`;
+      if (Number.isFinite(month) && month > 0) {
+        return Number.isFinite(day) && day > 0 ? `${month}/${day}/${year}` : `${month}/${year}`;
+      }
+      return `${year}`;
+    };
+
+    const start = formatParts(startYear, startMonth, startDay);
+    const end = formatParts(endYear, endMonth, endDay);
+    if (start && end) return `${start}–${end}`;
+    return start || event.displayDate || formatYear(event.start);
+  }
+
+  function mobileCardMarkup(event, isPrimary, isPeriod) {
+    const date = mobileShortDate(event);
+    const classNames = [
+      'event-label',
+      'mobile-timeline-card',
+      isPrimary ? 'mobile-primary-card' : 'mobile-secondary-card',
+      isPeriod ? 'mobile-period-card' : ''
+    ].filter(Boolean).join(' ');
+    const roleLabel = isPrimary ? t('details.aboveSet') : t('details.referenceSet');
+    return {
+      classNames,
+      html: `<span class="event-label-text">${escapeHtml(event.headline)}</span><span class="mobile-card-meta"><span class="mobile-card-date">${escapeHtml(date)}</span> <span class="mobile-card-group">${escapeHtml(event.categoryLabel || event.category)} · ${escapeHtml(roleLabel)}</span></span>`
+    };
+  }
+
+  function renderPhoneVertical(rect) {
+    const width = rect.width;
+    const height = rect.height;
+    const topPad = 28;
+    const bottomPad = 30;
+    const axisX = 42;
+    const usableHeight = Math.max(1, height - topPad - bottomPad);
+    const span = Math.max(MIN_VISIBLE_YEARS, state.viewEnd - state.viewStart);
+    const yearToY = value => topPad + ((value - state.viewStart) / span) * usableHeight;
+
+    state.dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width = Math.round(width * state.dpr);
+    canvas.height = Math.round(height * state.dpr);
+    leaderCanvas.width = Math.round(width * state.dpr);
+    leaderCanvas.height = Math.round(height * state.dpr);
+    canvas.style.height = '';
+    leaderCanvas.style.height = '';
+    labelLayer.style.height = '';
+    viewport.style.removeProperty('--mobile-content-height');
+
+    ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    leaderCtx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    leaderCtx.clearRect(0, 0, width, height);
+    labelLayer.replaceChildren();
+    state.hitTargets = [];
+    state.eventYearZones = [];
+    state.eventLabelZones = [];
+    state.mobileEventPositions = [];
+
+    drawBackground(width, height);
+
+    // Vertical time axis.
+    ctx.save();
+    ctx.strokeStyle = cssVar('--axis', '#30363d');
+    ctx.lineWidth = document.documentElement.dataset.theme === 'dark' ? 3 : 2;
+    ctx.beginPath();
+    ctx.moveTo(axisX + .5, 0);
+    ctx.lineTo(axisX + .5, height);
+    ctx.stroke();
+    ctx.restore();
+
+    // Scale-aware year/decade ticks.
+    const targetTicks = Math.max(4, Math.floor(height / 72));
+    const rawStep = span / targetTicks;
+    const candidates = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000];
+    const tickStep = candidates.find(step => step >= rawStep) || candidates[candidates.length - 1];
+    const firstTick = Math.ceil(state.viewStart / tickStep) * tickStep;
+
+    ctx.save();
+    ctx.font = '600 10px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
+    ctx.textBaseline = 'middle';
+    for (let year = firstTick; year <= state.viewEnd + tickStep * .25; year += tickStep) {
+      const y = yearToY(year);
+      if (y < -2 || y > height + 2) continue;
+      ctx.strokeStyle = cssVar('--tick', 'rgba(100,116,139,.55)');
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(axisX - 4, Math.round(y) + .5);
+      ctx.lineTo(axisX + 5, Math.round(y) + .5);
+      ctx.stroke();
+      ctx.fillStyle = cssVar('--text-muted', '#667085');
+      ctx.textAlign = 'right';
+      ctx.fillText(formatYear(year), axisX - 7, y);
+    }
+    ctx.restore();
+
+    const visible = state.events
+      .filter(event =>
+        state.enabledCategories.has(event.category) &&
+        event.elementType !== 'Title' &&
+        event.end >= state.viewStart &&
+        event.start <= state.viewEnd
+      )
+      .sort((a, b) => a.start - b.start || (importanceRank[b.importance] || 0) - (importanceRank[a.importance] || 0));
+
+    const visiblePeriods = visible.filter(event =>
+      event.elementType === 'Period' && Number.isFinite(event.end)
+    );
+    const periodLanes = [];
+    const periodLaneById = new Map();
+    for (const event of visiblePeriods) {
+      let lane = 0;
+      while (
+        lane < periodLanes.length &&
+        event.start <= periodLanes[lane] + 0.0001
+      ) lane++;
+      if (lane === periodLanes.length) periodLanes.push(-Infinity);
+      periodLanes[lane] = event.end;
+      periodLaneById.set(event.id, lane);
+    }
+    const periodRailWidth = 20;
+    const periodRailGap = 4;
+    const periodRailStartX = axisX + 19;
+    const periodRailSpan = visiblePeriods.length
+      ? Math.min(74, periodLanes.length * (periodRailWidth + periodRailGap))
+      : 0;
+
+    const durationEvents = visible.filter(event =>
+      event.elementType !== 'Period' &&
+      Number.isFinite(event.end) &&
+      event.end > event.start + 0.0001
+    );
+    const durationLaneById = new Map();
+    const durationLaneEnds = [];
+    for (const event of durationEvents) {
+      let lane = 0;
+      while (
+        lane < durationLaneEnds.length &&
+        event.start <= durationLaneEnds[lane] + 0.0001
+      ) lane++;
+      if (lane === durationLaneEnds.length) durationLaneEnds.push(-Infinity);
+      durationLaneEnds[lane] = event.end;
+      durationLaneById.set(event.id, lane);
+    }
+    const durationRailWidth = 3;
+    const durationRailGap = 2;
+    const phoneAxisHalfThickness =
+      (document.documentElement.dataset.theme === 'dark' ? 3 : 2) / 2;
+    const canvasAntialiasClearance = 0.5;
+    const durationRailStartX =
+      axisX + 0.5 +
+      phoneAxisHalfThickness +
+      durationRailWidth / 2 +
+      canvasAntialiasClearance;
+
+    // Greedy horizontal collision lanes. Events with the same date keep the same
+    // vertical coordinate and are moved into adjacent columns rather than spaced
+    // artificially in time.
+    const laneBottoms = [];
+    const rows = [];
+    const cardHeight = 30;
+    const cardGapY = 4;
+
+    for (const event of visible) {
+      const y = yearToY(event.start);
+      const top = y - cardHeight / 2;
+      let lane = 0;
+      while (lane < laneBottoms.length && top < laneBottoms[lane] + cardGapY) lane++;
+      if (lane === laneBottoms.length) laneBottoms.push(-Infinity);
+      laneBottoms[lane] = top + cardHeight;
+      rows.push({
+        event,
+        lane,
+        y,
+        top,
+        isPrimary: isPrimaryCategory(event.category),
+        isPeriod: event.elementType === 'Period'
+      });
+    }
+
+    const laneStep = 24;
+
+    for (const row of rows) {
+      const { event, lane, y, top, isPrimary, isPeriod } = row;
+      const eventBaseX = Math.max(50, periodRailStartX + periodRailSpan + 8);
+      const cardLeft = (isPrimary ? eventBaseX : eventBaseX + 14) + lane * laneStep;
+      const cardWidth = Math.max(118, width - cardLeft - 8);
+      const markerRadius = isPrimary ? 5 : 4;
+
+      state.mobileEventPositions.push({ event, y });
+
+      ctx.save();
+      ctx.strokeStyle = event.color;
+      ctx.fillStyle = event.color;
+
+      if (isPeriod) {
+        const periodStartY = event.start < state.viewStart
+          ? 0
+          : yearToY(event.start);
+        const periodEndY = event.end > state.viewEnd
+          ? height
+          : yearToY(event.end);
+        const periodLane = periodLaneById.get(event.id) || 0;
+        const railX = periodRailStartX + periodLane * (periodRailWidth + periodRailGap);
+        const railTop = Math.max(0, Math.min(periodStartY, periodEndY));
+        const railBottom = Math.min(height, Math.max(periodStartY, periodEndY));
+        const railHeight = Math.max(18, railBottom - railTop);
+        const selected = state.selectedPhonePeriodId === event.id;
+        ctx.restore();
+
+        const rail = document.createElement('button');
+        rail.type = 'button';
+        const continuesBefore = event.start < state.viewStart;
+        const continuesAfter = event.end > state.viewEnd;
+        rail.className = [
+          'event-label',
+          'mobile-period-rail',
+          selected ? 'is-selected' : '',
+          continuesBefore ? 'continues-before' : '',
+          continuesAfter ? 'continues-after' : ''
+        ].filter(Boolean).join(' ');
+        rail.dataset.eventId = event.id;
+        rail.style.left = `${railX - periodRailWidth / 2}px`;
+        rail.style.top = `${railTop}px`;
+        rail.style.width = `${selected ? 48 : periodRailWidth}px`;
+        rail.style.height = `${railHeight}px`;
+        rail.style.setProperty('--event-color', event.color);
+        const visiblePeriodTitle = railHeight < 24 ? '…' : event.headline;
+        const svgGradientId = `mobile-period-gradient-${String(event.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        // A rail is open only where the actual period continues outside the
+        // viewport. When its real start/end year is visible, draw that cap.
+        let framePath;
+        let interiorPath;
+        if (continuesBefore && continuesAfter) {
+          // Period crosses the entire viewport: two open-ended side strokes.
+          framePath = 'M 1.5 0 V 100 M 98.5 0 V 100';
+          interiorPath = 'M 1.5 0 H 98.5 V 100 H 1.5 Z';
+        } else if (continuesBefore) {
+          // Start is above the viewport; keep the top open and close the end.
+          framePath = 'M 1.5 0 V 92 Q 1.5 98.5 8 98.5 H 92 Q 98.5 98.5 98.5 92 V 0';
+          interiorPath = 'M 1.5 0 H 98.5 V 92 Q 98.5 98.5 92 98.5 H 8 Q 1.5 98.5 1.5 92 Z';
+        } else if (continuesAfter) {
+          // The actual start year is visible. Close it with a flat top edge;
+          // the period still continues beyond the bottom of the viewport.
+          framePath = 'M 1.5 100 V 1.5 H 98.5 V 100';
+          interiorPath = 'M 1.5 1.5 H 98.5 V 100 H 1.5 Z';
+        } else {
+          // Both actual boundaries are visible. Use a flat top and a rounded
+          // bottom: the start is precise, while the end reads as a terminal cap.
+          framePath = 'M 1.5 92 V 1.5 H 98.5 V 92 Q 98.5 98.5 92 98.5 H 8 Q 1.5 98.5 1.5 92';
+          interiorPath = 'M 1.5 1.5 H 98.5 V 92 Q 98.5 98.5 92 98.5 H 8 Q 1.5 98.5 1.5 92 Z';
+        }
+        rail.innerHTML = `
+          <svg class="mobile-period-frame" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            <defs>
+              <linearGradient id="${svgGradientId}" x1="0" y1="0" x2="100" y2="0" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#168cff"></stop>
+                <stop offset="48%" stop-color="#6f63ff"></stop>
+                <stop offset="100%" stop-color="#ff3d9a"></stop>
+              </linearGradient>
+            </defs>
+            <path class="mobile-period-frame-path" d="${framePath}" stroke="url(#${svgGradientId})"></path>
+          </svg>
+          <span class="event-label-text mobile-period-text" title="${escapeAttribute(event.headline)}">${escapeHtml(visiblePeriodTitle)}</span>`;
+        rail.addEventListener('click', clickEvent => {
+          clickEvent.preventDefault();
+          clickEvent.stopPropagation();
+
+          if (state.selectedPhonePeriodId !== event.id) {
+            state.selectedPhonePeriodId = event.id;
+            scheduleRender();
+            return;
+          }
+
+          const viewportRect = viewport.getBoundingClientRect();
+          openDetails(
+            event,
+            viewportRect.left + Math.min(width - 16, railX + 52),
+            viewportRect.top + Math.max(14, Math.min(height - 14, railTop + 18))
+          );
+        });
+        labelLayer.appendChild(rail);
+
+        state.hitTargets.push({
+          event,
+          x1: railX - periodRailWidth / 2,
+          x2: railX + (selected ? 48 : periodRailWidth),
+          y1: railTop,
+          y2: railTop + railHeight
+        });
+        continue;
+      }
+
+      if (Number.isFinite(event.end) && event.end > event.start + 0.0001) {
+        const durationLane = durationLaneById.get(event.id) || 0;
+        const spanX = durationRailStartX + durationLane * (durationRailWidth + durationRailGap);
+        const spanStartY = yearToY(Math.max(event.start, state.viewStart));
+        const spanEndY = yearToY(Math.min(event.end, state.viewEnd));
+        ctx.save();
+        ctx.strokeStyle = event.color;
+        ctx.lineWidth = durationRailWidth;
+        ctx.lineCap = 'butt';
+        ctx.beginPath();
+        ctx.moveTo(spanX, spanStartY);
+        ctx.lineTo(spanX, spanEndY);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.beginPath();
+      ctx.arc(axisX, y, markerRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(axisX + markerRadius, y);
+      ctx.lineTo(cardLeft, y);
+      ctx.stroke();
+      ctx.restore();
+
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = [
+        'event-label',
+        'mobile-scale-card',
+        isPrimary ? 'mobile-scale-primary' : 'mobile-scale-reference'
+      ].filter(Boolean).join(' ');
+      card.dataset.eventId = event.id;
+      card.style.left = `${cardLeft}px`;
+      card.style.top = `${top}px`;
+      card.style.width = `${cardWidth}px`;
+      card.style.height = `${cardHeight}px`;
+      card.style.setProperty('--event-color', event.color);
+      card.innerHTML = `<span class="event-label-text">${escapeHtml(event.headline)}</span>`;
+      card.addEventListener('click', clickEvent => {
+        clickEvent.preventDefault();
+        clickEvent.stopPropagation();
+        const viewportRect = viewport.getBoundingClientRect();
+        openDetails(
+          event,
+          viewportRect.left + Math.min(width - 16, cardLeft + cardWidth * .65),
+          viewportRect.top + Math.max(14, Math.min(height - 14, y))
+        );
+      });
+      labelLayer.appendChild(card);
+
+      state.hitTargets.push({
+        event,
+        x1: cardLeft,
+        x2: cardLeft + cardWidth,
+        y1: top,
+        y2: top + cardHeight
+      });
+    }
+
+    drawMobileYearCursor(width, height);
+    overviewNavigator.hidden = false;
+    drawOverview();
+    updateLaneLegends();
+    syncZoomDial();
+  }
+
+  function drawMobileYearCursor(width, height) {
+    if (state.cursorY == null) return;
+    const y = Math.max(0, Math.min(height, state.cursorY));
+    ctx.save();
+    ctx.strokeStyle = '#ffe600';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, Math.round(y) + .5);
+    ctx.lineTo(width, Math.round(y) + .5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function render() {
+    resetRendererMode();
     clampView();
     const rect = viewport.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
+    if (isPhoneVerticalMode()) {
+      renderPhoneVertical(rect);
+      return;
+    }
+    overviewNavigator.hidden = false;
     state.dpr = Math.max(1, window.devicePixelRatio || 1);
     canvas.width = Math.round(rect.width * state.dpr);
     canvas.height = Math.round(rect.height * state.dpr);
@@ -1104,6 +2141,22 @@
   }
 
   function updateYearCursor(event) {
+    if (isPhoneVerticalMode()) {
+      const rect = viewport.getBoundingClientRect();
+      const topPad = 28;
+      const bottomPad = 30;
+      const usableHeight = Math.max(1, rect.height - topPad - bottomPad);
+      state.cursorY = Math.max(topPad, Math.min(rect.height - bottomPad, event.clientY - rect.top));
+      const ratio = (state.cursorY - topPad) / usableHeight;
+      state.cursorYear = state.viewStart + ratio * (state.viewEnd - state.viewStart);
+      yearCursor.style.top = `${state.cursorY}px`;
+      yearCursor.style.left = '0px';
+      yearCursorLabel.textContent = formatCursorYear(state.cursorYear);
+      yearCursorRelative.textContent = formatRelativeYears(state.cursorYear);
+      yearCursor.hidden = false;
+      scheduleRender();
+      return;
+    }
     const railRect = zoomRail?.getBoundingClientRect();
     const overZoomRail = railRect &&
       event.clientX >= railRect.left && event.clientX <= railRect.right &&
@@ -1120,8 +2173,19 @@
     const year = state.viewStart + (x / rect.width) * (state.viewEnd - state.viewStart);
     state.cursorX = x;
     state.cursorYear = year;
-    yearCursor.style.left = `${x + 5}px`;
+
+    // Phone mode positions the horizontal cursor with an inline `top` value.
+    // Clear that mode-specific geometry before drawing the desktop vertical
+    // ruler, otherwise its top endpoint—and therefore both labels—can remain
+    // stranded in the middle of the canvas after a mode/preview switch.
+    yearCursor.style.top = '0px';
+    yearCursor.style.bottom = '0px';
+    yearCursor.style.right = 'auto';
+    yearCursor.style.height = 'auto';
+    yearCursor.style.width = '0px';
+    yearCursor.style.left = `${x}px`;
     yearCursorLabel.textContent = formatCursorYear(year);
+    yearCursorRelative.textContent = formatRelativeYears(year);
     yearCursor.hidden = false;
     scheduleRender();
   }
@@ -1130,6 +2194,25 @@
     const span = state.viewEnd - state.viewStart;
     if (span < 1) return formatFineDate(value, span < .08 ? 1 / 365.2425 : 1 / 12);
     return formatYear(Math.round(value));
+  }
+
+  function formatRelativeYears(value) {
+    const now = new Date();
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    const nextYear = new Date(now.getFullYear() + 1, 0, 1);
+    const yearProgress = (now - startOfYear) / Math.max(1, nextYear - startOfYear);
+    const currentYear = now.getFullYear() + yearProgress;
+    const delta = currentYear - Number(value);
+    if (!Number.isFinite(delta) || Math.abs(delta) < 1) {
+      return state.language === 'zh-TW' ? '今年' : 'this year';
+    }
+    const years = Math.max(1, Math.floor(Math.abs(delta)));
+    if (state.language === 'zh-TW') {
+      return delta >= 0 ? `${years} 年前` : `${years} 年後`;
+    }
+    return delta >= 0
+      ? `${years} year${years === 1 ? '' : 's'} ago`
+      : `in ${years} year${years === 1 ? '' : 's'}`;
   }
 
   function drawBackground(width, height) {
@@ -1249,6 +2332,7 @@
     return [
       event.headline,
       event.category,
+      event.categoryLabel || event.category,
       event.text,
       event.displayDate,
       formatYear(event.start),
@@ -1286,8 +2370,8 @@
       return anchor >= state.viewStart - labelOverscanYears && anchor <= state.viewEnd + labelOverscanYears;
     });
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
-    const above = visible.filter(e => state.aboveGroups.has(e.category));
-    const below = visible.filter(e => !state.aboveGroups.has(e.category));
+    const above = visible.filter(e => isPrimaryCategory(e.category));
+    const below = visible.filter(e => !isPrimaryCategory(e.category));
     const abovePoints = above.filter(e => e.elementType !== 'Period');
     const belowPoints = below.filter(e => e.elementType !== 'Period');
     const abovePeriods = above.filter(e => e.elementType === 'Period' && e.end != null);
@@ -1307,7 +2391,18 @@
   }
 
   function resolvePosition(event) {
-    return state.aboveGroups.has(event.category) ? 'Above' : 'Below';
+    return isPrimaryCategory(event.category) ? 'Above' : 'Below';
+  }
+
+  function measureEventLabelWidth(text, isMajor, hasThumbnail) {
+    const probe = document.createElement('span');
+    probe.className = 'event-label-measure-probe';
+    probe.style.fontWeight = isMajor ? '650' : '520';
+    probe.textContent = text || '';
+    document.body.appendChild(probe);
+    const width = Math.ceil(probe.getBoundingClientRect().width + 20 + (hasThumbnail ? 33 : 0));
+    probe.remove();
+    return width;
   }
 
   function drawPointRows(events, width, axisY, isAbove, threshold) {
@@ -1337,12 +2432,12 @@
       const visibleRangeRight = Math.max(startX, endX);
       if (visibleRangeRight < -40 || visibleRangeLeft > width + 40) return;
       const showLabel = (importanceRank[event.importance] || 2) >= threshold;
-      ctx.save();
-      ctx.font = `${event.importance === 'Major' ? '650' : '520'} 13px -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif`;
       const timelinePreview = event.thumbnail || (looksLikeImage(event.media) ? event.media : '');
-      const thumbnailAllowance = timelinePreview ? 33 : 0;
-      const measuredLabelWidth = Math.ceil(ctx.measureText(event.headline).width + 20 + thumbnailAllowance);
-      ctx.restore();
+      const measuredLabelWidth = measureEventLabelWidth(
+        event.headline,
+        event.importance === 'Major',
+        Boolean(timelinePreview)
+      );
       // The zoom rail is a visual and interaction overlay, not a clipping
       // boundary. Event labels continue beneath its frosted surface and are
       // clipped only by the timeline viewport itself. This lets a label remain
@@ -1407,8 +2502,14 @@
       }
 
       const microLane = hasRange ? (durationLanes.get(event.id) || 0) : 0;
-      const spanOffset = hasRange ? 3 + microLane * 4 : 0;
-      const spanY = hasRange ? axisY + (isAbove ? -spanOffset : spanOffset) : axisY;
+      const axisHalfThickness = 2;
+      const spanHalfThickness = 1.5;
+      const spanOffset = hasRange
+        ? axisHalfThickness + spanHalfThickness + microLane * 4
+        : 0;
+      const spanY = hasRange
+        ? axisY + (isAbove ? -spanOffset : spanOffset)
+        : axisY;
 
       state.pendingLeaders.push({
         event,
@@ -1566,6 +2667,10 @@
         label.style.setProperty('--leader-distance', `${Math.max(0, Math.abs(spanY - labelTop))}px`);
         label.style.maxWidth = `${labelWidth}px`;
         labelLayer.appendChild(label);
+        requestAnimationFrame(() => {
+          const clipped = labelText.scrollWidth > labelText.clientWidth + 1;
+          labelText.classList.toggle('is-clipped', clipped);
+        });
         state.eventLabelZones.push({
           x1: labelLeft,
           x2: labelRight,
@@ -1648,11 +2753,126 @@
 
       ctx.save();
       ctx.globalAlpha = 1;
-      const flatVisualTheme = document.documentElement.dataset.visualTheme === 'flat';
+      const visualTheme = document.documentElement.dataset.visualTheme || 'gradient';
+      const flatVisualTheme = visualTheme === 'flat';
+      const aiVisualTheme = visualTheme === 'ai';
+      const metroVisualTheme = visualTheme === 'metro';
+      if (metroVisualTheme) {
+        const visibleLeft = Math.max(0, left);
+        const visibleRight = Math.min(width, right);
+        const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+        if (visibleWidth <= 0) {
+          ctx.restore();
+          continue;
+        }
+
+        const lineY = y + barHeight - 5;
+        const actualStartVisible = left >= 0 && left <= width;
+        const actualEndVisible = right >= 0 && right <= width;
+
+        // Duration line.
+        ctx.strokeStyle = periodFill;
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'butt';
+        ctx.beginPath();
+        ctx.moveTo(visibleLeft, lineY);
+        ctx.lineTo(visibleRight, lineY);
+        ctx.stroke();
+
+        // Start accent uses the same 4px vertical-bar language as Metro events.
+        if (actualStartVisible) {
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(left, y + 5);
+          ctx.lineTo(left, lineY);
+          ctx.stroke();
+        }
+
+        // Small end cap only when the true end is visible.
+        if (actualEndVisible) {
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(right, lineY - 7);
+          ctx.lineTo(right, lineY + 1);
+          ctx.stroke();
+        }
+
+        state.hitTargets.push({
+          event,
+          x1: visibleLeft,
+          x2: visibleRight,
+          y1: y,
+          y2: y + barHeight
+        });
+
+        if ((importanceRank[event.importance] || 2) >= threshold) {
+          const fullText = `${event.headline}${event.displayDate ? ` ${event.displayDate}` : ''}`;
+          const textPadding = 8;
+          const availableWidth = Math.max(0, visibleWidth - textPadding * 2);
+
+          ctx.font = '650 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = periodFill;
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+
+          let renderedText = fullText;
+          const fullWidth = ctx.measureText(fullText).width;
+          const tiny = visibleWidth < 22;
+          const truncated = tiny || fullWidth > availableWidth;
+
+          if (tiny) {
+            renderedText = '…';
+          } else if (truncated) {
+            const ellipsis = '…';
+            let low = 0;
+            let high = fullText.length;
+            while (low < high) {
+              const mid = Math.ceil((low + high) / 2);
+              const candidate = fullText.slice(0, mid).trimEnd() + ellipsis;
+              if (ctx.measureText(candidate).width <= availableWidth) low = mid;
+              else high = mid - 1;
+            }
+            renderedText = fullText.slice(0, low).trimEnd() + ellipsis;
+          }
+
+          const textX = tiny
+            ? visibleLeft + visibleWidth / 2
+            : truncated
+              ? visibleLeft + textPadding
+              : visibleLeft + visibleWidth / 2;
+
+          ctx.textAlign = tiny ? 'center' : truncated ? 'left' : 'center';
+          ctx.fillText(renderedText, textX, y + 10);
+
+          state.eventLabelZones.push({
+            x1: visibleLeft,
+            x2: visibleRight,
+            y1: y,
+            y2: y + barHeight,
+            ownerId: event.id
+          });
+        }
+
+        ctx.restore();
+        continue;
+      }
+
       if (flatVisualTheme) {
-        ctx.fillStyle = mixHex(periodFill, document.documentElement.dataset.theme === 'dark' ? '#101214' : '#ffffff', 0.18);
+        ctx.fillStyle = document.documentElement.dataset.theme === 'dark'
+          ? cssVar('--surface-solid', '#1f242c')
+          : mixHex(periodFill, '#ffffff', 0.18);
         ctx.strokeStyle = mixHex(periodFill, document.documentElement.dataset.theme === 'dark' ? '#ffffff' : '#08111f', 0.74);
         ctx.lineWidth = 1.5;
+      } else if (aiVisualTheme) {
+        ctx.fillStyle = document.documentElement.dataset.theme === 'dark'
+          ? cssVar('--surface-solid', '#1f242c')
+          : '#ffffff';
+        const aiBorder = ctx.createLinearGradient(left, 0, right, 0);
+        aiBorder.addColorStop(0, '#168cff');
+        aiBorder.addColorStop(1, '#ff3d9a');
+        ctx.strokeStyle = aiBorder;
+        ctx.lineWidth = 2;
       } else {
         const periodGradient = ctx.createLinearGradient(left, 0, right, 0);
         periodGradient.addColorStop(0, mixHex(periodFill, '#08111f', 0.76));
@@ -1667,7 +2887,7 @@
         ctx.rect(left, y, periodWidth, barHeight);
       }
       ctx.fill();
-      if (flatVisualTheme) ctx.stroke();
+      if (flatVisualTheme || aiVisualTheme) ctx.stroke();
       state.hitTargets.push({ event, x1: Math.max(0, left), x2: Math.min(width, right), y1: y, y2: y + barHeight });
       ctx.restore();
 
@@ -1675,7 +2895,7 @@
         const visibleLeft = Math.max(0, left);
         const visibleRight = Math.min(width, right);
         const visibleWidth = Math.max(0, visibleRight - visibleLeft);
-        if (visibleWidth < 24) continue;
+        if (visibleWidth <= 0) continue;
 
         // Era text is painted by the same canvas pass as its bar. Keeping the fill
         // and text in one coordinate system prevents DOM labels from escaping to
@@ -1695,15 +2915,21 @@
         ctx.textBaseline = 'middle';
         ctx.fillStyle = flatVisualTheme
           ? mixHex(periodFill, document.documentElement.dataset.theme === 'dark' ? '#ffffff' : '#08111f', 0.78)
-          : '#ffffff';
-        ctx.shadowColor = flatVisualTheme ? 'transparent' : 'rgba(0,0,0,.28)';
-        ctx.shadowBlur = flatVisualTheme ? 0 : 1;
-        ctx.shadowOffsetY = flatVisualTheme ? 0 : 1;
+          : aiVisualTheme
+            ? periodFill
+            : '#ffffff';
+        ctx.shadowColor = (flatVisualTheme || aiVisualTheme) ? 'transparent' : 'rgba(0,0,0,.28)';
+        ctx.shadowBlur = (flatVisualTheme || aiVisualTheme) ? 0 : 1;
+        ctx.shadowOffsetY = (flatVisualTheme || aiVisualTheme) ? 0 : 1;
 
         let renderedText = fullText;
         const fullTextWidth = ctx.measureText(fullText).width;
-        const isTruncated = fullTextWidth > availableWidth;
-        if (isTruncated) {
+        const tinyBar = visibleWidth < 24;
+        const isTruncated = tinyBar || fullTextWidth > availableWidth;
+
+        if (tinyBar) {
+          renderedText = '…';
+        } else if (isTruncated) {
           const ellipsis = '…';
           let low = 0;
           let high = fullText.length;
@@ -1716,12 +2942,15 @@
           renderedText = fullText.slice(0, low).trimEnd() + ellipsis;
         }
 
-        // Center complete names within the currently visible part of the bar.
-        // Truncated names are left-aligned so their beginning remains readable.
-        const textX = isTruncated
-          ? visibleLeft + horizontalPadding
-          : visibleLeft + visibleWidth / 2;
-        ctx.textAlign = isTruncated ? 'left' : 'center';
+        // Complete titles are centered in the currently visible portion of a
+        // long bar. Truncated titles begin at the visible edge, while tiny bars
+        // always show a centered ellipsis indicator rather than appearing empty.
+        const textX = tinyBar
+          ? visibleLeft + visibleWidth / 2
+          : isTruncated
+            ? visibleLeft + horizontalPadding
+            : visibleLeft + visibleWidth / 2;
+        ctx.textAlign = tinyBar ? 'center' : isTruncated ? 'left' : 'center';
         ctx.fillText(renderedText, textX, y + barHeight / 2);
         ctx.restore();
 
@@ -1780,7 +3009,7 @@
   function targetAtClientPoint(clientX, clientY) {
     const rect = viewport.getBoundingClientRect();
     const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    const y = clientY - rect.top + (isPhoneVerticalMode() ? viewport.scrollTop : 0);
     return [...state.hitTargets].reverse().find(t => x >= t.x1 && x <= t.x2 && y >= t.y1 && y <= t.y2) || null;
   }
 
@@ -1802,14 +3031,234 @@
     closeDetails();
   }
 
+  function translationRecord(entityId, field) {
+    if (state.language === state.defaultLanguage) return null;
+    return state.translations.get(translationMapKey(entityId, state.language, field)) || null;
+  }
+
+  function translationStatusIsMachine(status) {
+    return !['approved', 'human', 'manual', 'verified'].includes(String(status || 'machine').toLowerCase());
+  }
+
+  function fieldUsesMachineTranslation(event, field, sourceField) {
+    if (state.language === state.defaultLanguage) return false;
+    const sourceText = String(event[sourceField] || '').trim();
+    const displayedText = String(event[field] || '').trim();
+    if (!sourceText || !displayedText || displayedText === sourceText) return false;
+    const record = translationRecord(event.id, field);
+    return record ? translationStatusIsMachine(record.status) : true;
+  }
+
+  function groupUsesMachineTranslation(event) {
+    if (state.language === state.defaultLanguage) return false;
+    const sourceText = String(event.category || '').trim();
+    const displayedText = String(event.categoryLabel || '').trim();
+    if (!sourceText || !displayedText || sourceText === displayedText) return false;
+    const record = translationRecord(`GROUP:${event.category}`, 'name');
+    return record ? translationStatusIsMachine(record.status) : true;
+  }
+
+  function detailUsesMachineTranslation(event) {
+    const translatedFieldsDiffer = [
+      ['headline', 'sourceHeadline'],
+      ['text', 'sourceText'],
+      ['mediaCaption', 'sourceMediaCaption']
+    ].some(([field, sourceField]) => {
+      const source = String(event[sourceField] || '').trim();
+      const shown = String(event[field] || '').trim();
+      return source && shown && source !== shown;
+    });
+
+    return translatedFieldsDiffer ||
+      fieldUsesMachineTranslation(event, 'headline', 'sourceHeadline') ||
+      fieldUsesMachineTranslation(event, 'text', 'sourceText') ||
+      fieldUsesMachineTranslation(event, 'mediaCaption', 'sourceMediaCaption') ||
+      groupUsesMachineTranslation(event);
+  }
+
+  function mediaSourceLabel(url) {
+    const value = String(url || '').trim();
+    if (!value) return '';
+    try {
+      const host = new URL(value, window.location.href).hostname
+        .replace(/^www\./, '');
+      if (host === 'upload.wikimedia.org' || host.endsWith('.wikimedia.org')) {
+        return 'Wikimedia Commons';
+      }
+      return host || value;
+    } catch (_) {
+      return value;
+    }
+  }
+
+  function detailDisplayValues(event, showOriginal) {
+    if (!showOriginal) {
+      return {
+        headline: compactCjkLatinSpacing(sanitizeTranslationArtifacts(event.headline)),
+        text: compactCjkLatinSpacing(sanitizeTranslationArtifacts(event.text)),
+        mediaCaption: compactCjkLatinSpacing(sanitizeTranslationArtifacts(event.mediaCaption)),
+        category: compactCjkLatinSpacing(event.categoryLabel || event.category),
+        displayDate: compactCjkLatinSpacing(event.displayDate || formatYear(event.start))
+      };
+    }
+    return {
+      headline: compactCjkLatinSpacing(event.sourceHeadline || event.headline),
+      text: compactCjkLatinSpacing(event.sourceText || ''),
+      mediaCaption: compactCjkLatinSpacing(event.sourceMediaCaption || ''),
+      category: compactCjkLatinSpacing(event.category),
+      displayDate: compactCjkLatinSpacing(event.sourceDisplayDate || formatYear(event.start))
+    };
+  }
+
+  function detailDateText(event, showOriginal) {
+    const explicit = showOriginal
+      ? event.sourceDisplayDate
+      : event.displayDate;
+    if (explicit) return compactCjkLatinSpacing(explicit);
+
+    const localized = showOriginal
+      ? ''
+      : localizedDisplayDate(event);
+    if (localized) return compactCjkLatinSpacing(localized);
+
+    const startText = formatYear(event.start);
+    if (!Number.isFinite(event.end) || event.end <= event.start + 0.0001) return startText;
+    return compactCjkLatinSpacing(`${startText}–${formatYear(event.end)}`);
+  }
+
+  function detailDurationText(event) {
+    if (!Number.isFinite(event.start) || !Number.isFinite(event.end) || event.end <= event.start + 0.0001) {
+      return '';
+    }
+
+    const totalMonths = Math.max(1, Math.round((event.end - event.start) * 12));
+    const years = Math.floor(totalMonths / 12);
+    const months = totalMonths % 12;
+
+    if (state.language === 'zh-TW') {
+      const parts = [];
+      if (years) parts.push(`${years}年`);
+      if (months) parts.push(`${months}個月`);
+      return parts.join('');
+    }
+
+    const parts = [];
+    if (years) parts.push(`${years} ${years === 1 ? 'year' : 'years'}`);
+    if (months) parts.push(`${months} ${months === 1 ? 'month' : 'months'}`);
+    return parts.join(' ');
+  }
+
+  function detailTypeText(event) {
+    return event.elementType === 'Period'
+      ? t('details.period')
+      : t('details.event');
+  }
+
+  function detailFinePrintItems(event, values, hasMachineTranslation, showOriginal) {
+    const items = [];
+
+    if (values.mediaCaption) {
+      items.push(values.mediaCaption);
+    }
+
+    if (event.mediaCredit) {
+      items.push(`${t('details.source')}: ${event.mediaCredit}`);
+    }
+
+    if (event.media) {
+      items.push(`${t('details.mediaSource')}: ${event.media}`);
+    }
+
+    if (hasMachineTranslation) {
+      items.push(t('details.machineTranslationDisclosure'));
+    }
+
+    return items.map(item => compactCjkLatinSpacing(item));
+  }
+
+  function detailHasAlternateLanguage(event) {
+    const sourceHeadline = String(event.sourceHeadline || '').trim();
+    const sourceText = String(event.sourceText || '').trim();
+    const sourceCaption = String(event.sourceMediaCaption || '').trim();
+
+    const shownHeadline = String(event.headline || '').trim();
+    const shownText = String(event.text || '').trim();
+    const shownCaption = String(event.mediaCaption || '').trim();
+
+    return Boolean(
+      (sourceHeadline && sourceHeadline !== shownHeadline) ||
+      (sourceText && sourceText !== shownText) ||
+      (sourceCaption && sourceCaption !== shownCaption)
+    );
+  }
+
   function detailMarkup(event) {
+    const showOriginal = Boolean(state.detailShowOriginal);
+    const values = detailDisplayValues(event, showOriginal);
+    const hasTranslatedText = detailUsesMachineTranslation(event);
+    const hasAlternateLanguage = detailHasAlternateLanguage(event);
     const preview = event.thumbnail || (looksLikeImage(event.media) ? event.media : '');
-    const image = preview ? `<img src="${escapeAttribute(preview)}" alt="${escapeAttribute(event.mediaCaption || event.headline)}" onerror="this.style.display='none'" />` : '';
-    const body = event.text ? `<div class="detail-body">${escapeHtml(event.text)}</div>` : '<div class="detail-body">No additional description is available.</div>';
-    const caption = event.mediaCaption ? `<div class="detail-meta">${escapeHtml(event.mediaCaption)}</div>` : '';
-    const credit = event.mediaCredit ? `<div class="detail-meta">Credit: ${escapeHtml(event.mediaCredit)}</div>` : '';
-    const link = event.media ? `<section class="detail-media"><div class="detail-meta">Media</div><a href="${escapeAttribute(mediaDestinationUrl(event.media))}" target="_blank" rel="noopener noreferrer">Open media ↗</a><div class="detail-media-url">${escapeHtml(event.media)}</div></section>` : '<div class="detail-meta">No media link is present in this record.</div>';
-    return `<h2>${escapeHtml(event.headline)}</h2><div class="detail-date">${escapeHtml(event.displayDate || formatYear(event.start))}</div><div class="detail-meta">${escapeHtml(event.category)} · ${escapeHtml(event.elementType)}</div>${image}${caption}${credit}${body}${link}`;
+
+    const dateText = detailDateText(event, showOriginal);
+    const durationText = detailDurationText(event);
+    const typeText = detailTypeText(event);
+    const metadata = compactCjkLatinSpacing(
+      [dateText, values.category, typeText, durationText].filter(Boolean).join(' • ')
+    );
+
+    const image = preview
+      ? `<img class="detail-image" src="${escapeAttribute(preview)}" alt="${escapeAttribute(values.mediaCaption || values.headline)}" onerror="this.style.display='none'" />`
+      : '';
+
+    const body = values.text
+      ? `<div class="detail-body">${escapeHtml(values.text)}</div>`
+      : `<div class="detail-body">${escapeHtml(t('details.noDescription'))}</div>`;
+
+    const mediaSection = event.media
+      ? `<section class="detail-media">
+          <div class="detail-meta">${escapeHtml(t('details.mediaSource'))}</div>
+          <a href="${escapeAttribute(mediaDestinationUrl(event.media))}" target="_blank" rel="noopener noreferrer">Open media ↗</a>
+          <div class="detail-media-url">${escapeHtml(event.media)}</div>
+        </section>`
+      : '';
+
+    const finePrintParts = [];
+
+    const explicitCredit = String(event.mediaCredit || '').trim();
+    const fallbackSource = mediaSourceLabel(event.media || preview);
+    const sourceLabel = explicitCredit || fallbackSource || (state.language === 'zh-TW' ? '時間軸資料記錄' : 'Timeline record');
+    finePrintParts.push(`<span class="detail-fine-print-source"><strong>${escapeHtml(t('details.source'))}:</strong> ${escapeHtml(sourceLabel)}</span>`);
+
+    if (event.media) {
+      finePrintParts.push(`<span>${escapeHtml(t('details.mediaDisclosure'))}</span>`);
+    }
+
+    const hasOriginalSource = Boolean(
+      String(event.sourceHeadline || '').trim() ||
+      String(event.sourceText || '').trim() ||
+      String(event.sourceMediaCaption || '').trim()
+    );
+    const shouldOfferOriginal = hasOriginalSource && (state.language !== 'en-US' || hasAlternateLanguage || hasTranslatedText);
+
+    if (hasTranslatedText || hasAlternateLanguage || shouldOfferOriginal) {
+      finePrintParts.push(`<span>${escapeHtml(t('details.machineTranslationDisclosure'))}</span>`);
+      if (shouldOfferOriginal) {
+        finePrintParts.push(
+          `<a href="#" class="detail-language-link" data-detail-language-toggle>${escapeHtml(
+            showOriginal ? t('details.showTranslation') : t('details.showOriginal')
+          )}</a>`
+        );
+      }
+    }
+
+    const finePrint = `<p class="detail-fine-print" role="note" aria-label="Credits and translation information">${finePrintParts.join('  ')}</p>`;
+
+    return `<h2>${escapeHtml(values.headline)}</h2>
+      <div class="detail-date detail-meta-line">${escapeHtml(metadata)}</div>
+      ${image}
+      ${body}
+      ${mediaSection}
+      ${finePrint}`;
   }
 
   function animateViewTo(targetStart, targetEnd, duration = 220, onDone = null) {
@@ -1915,6 +3364,7 @@
     if (!DETAILS_ENABLED) return;
 
     state.selectedEvent = event;
+    state.detailShowOriginal = false;
     state.detailRestoreView = null;
 
     state.tooltipPinned = false;
@@ -1950,6 +3400,7 @@
     state.detailRestoreView = null;
     state.detailAnchor = null;
     state.selectedEvent = null;
+    state.detailShowOriginal = false;
     detailPanel.classList.remove('is-opening');
     detailPanel.hidden = true;
 
@@ -1973,7 +3424,7 @@
     if (!state.searchMatches.length) {
       state.searchMatchIndex = -1;
       searchResults.hidden = !query;
-      searchResultCount.textContent = '0 / 0';
+      searchResultCount.textContent = '0/0';
       searchPrevious.disabled = true;
       searchNext.disabled = true;
       return;
@@ -1988,7 +3439,7 @@
 
     searchResults.hidden = false;
     searchResultCount.textContent =
-      `${state.searchMatchIndex + 1} / ${state.searchMatches.length}`;
+      `${state.searchMatchIndex + 1}/${state.searchMatches.length}`;
     searchPrevious.disabled = false;
     searchNext.disabled = false;
   }
@@ -2035,7 +3486,7 @@
     // Search navigation focuses the viewport without opening details.
     state.selectedEvent = null;
     searchResultCount.textContent =
-      `${state.searchMatchIndex + 1} / ${state.searchMatches.length}`;
+      `${state.searchMatchIndex + 1}/${state.searchMatches.length}`;
 
     scheduleRender();
   }
@@ -2064,11 +3515,14 @@
 
   function overviewRatioFromPointer(event) {
     const rect = overviewTrack.getBoundingClientRect();
+    if (isPhoneVerticalMode()) {
+      return Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)));
+    }
     return Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
   }
 
   function moveOverviewWindowTo(centerRatio) {
-    const bounds = navigationBounds();
+    const bounds = overviewDataBounds();
     const fullSpan = Math.max(0.0001, bounds.max - bounds.min);
     const span = Math.min(fullSpan, state.viewEnd - state.viewStart);
     const center = bounds.min + centerRatio * fullSpan;
@@ -2080,30 +3534,46 @@
     if (!overviewTrack.contains(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
-    overviewNavigator.setPointerCapture?.(event.pointerId);
+
+    const trackRect = overviewTrack.getBoundingClientRect();
+    const windowRect = overviewWindow.getBoundingClientRect();
     const ratio = overviewRatioFromPointer(event);
-    const bounds = navigationBounds();
+    const bounds = overviewDataBounds();
     const fullSpan = Math.max(0.0001, bounds.max - bounds.min);
     const windowCenterRatio = (((state.viewStart + state.viewEnd) / 2) - bounds.min) / fullSpan;
-    const handle = event.target.closest?.('[data-overview-handle]');
+    const vertical = isPhoneVerticalMode();
+    const handleZone = vertical ? 18 : 14;
+    const coordinate = vertical ? event.clientY : event.clientX;
+    const startEdge = vertical ? windowRect.top : windowRect.left;
+    const endEdge = vertical ? windowRect.bottom : windowRect.right;
+    const insideWindow = vertical
+      ? event.clientY >= windowRect.top && event.clientY <= windowRect.bottom
+      : event.clientX >= windowRect.left && event.clientX <= windowRect.right;
+
+    overviewTrack.setPointerCapture?.(event.pointerId);
     state.overviewDragging = true;
     state.overviewDragStartRatio = ratio;
     state.overviewDragStartViewStart = state.viewStart;
     state.overviewDragStartViewEnd = state.viewEnd;
 
-    if (handle) {
-      state.overviewDragMode = handle.dataset.overviewHandle;
+    // Detect handles from actual geometry, not fragile DOM/pseudo-element targeting.
+    if (Math.abs(coordinate - startEdge) <= handleZone) {
+      state.overviewDragMode = 'left';
+      return;
+    }
+    if (Math.abs(coordinate - endEdge) <= handleZone) {
+      state.overviewDragMode = 'right';
+      return;
+    }
+    if (insideWindow) {
+      state.overviewDragMode = 'pan';
+      state.overviewDragOffsetRatio = ratio - windowCenterRatio;
       return;
     }
 
-    if (overviewWindow.contains(event.target)) {
-      state.overviewDragMode = 'pan';
-      state.overviewDragOffsetRatio = ratio - windowCenterRatio;
-    } else {
-      state.overviewDragMode = 'pan';
-      state.overviewDragOffsetRatio = 0;
-      moveOverviewWindowTo(ratio);
-    }
+    state.overviewDragMode = 'pan';
+    state.overviewDragOffsetRatio = 0;
+    moveOverviewWindowTo(ratio);
   }
 
   function onOverviewPointerMove(event) {
@@ -2115,7 +3585,7 @@
       return;
     }
 
-    const bounds = navigationBounds();
+    const bounds = overviewDataBounds();
     const fullSpan = Math.max(0.0001, bounds.max - bounds.min);
     const minSpan = Math.min(fullSpan, Math.max(MIN_VISIBLE_YEARS, fullSpan * 0.002));
     const pointerTime = bounds.min + ratio * fullSpan;
@@ -2131,14 +3601,15 @@
     if (!state.overviewDragging) return;
     state.overviewDragging = false;
     state.overviewDragMode = null;
-    overviewNavigator.releasePointerCapture?.(event.pointerId);
+    state.overviewDragOffsetRatio = 0;
+    overviewTrack.releasePointerCapture?.(event.pointerId);
   }
 
   function onOverviewWheel(event) {
     if (!overviewTrack.contains(event.target)) return;
     event.preventDefault();
     const ratio = overviewRatioFromPointer(event);
-    const bounds = navigationBounds();
+    const bounds = overviewDataBounds();
     const fullSpan = Math.max(0.0001, bounds.max - bounds.min);
     const currentSpan = Math.max(MIN_VISIBLE_YEARS, state.viewEnd - state.viewStart);
     const anchorTime = bounds.min + ratio * fullSpan;
@@ -2157,27 +3628,106 @@
     overviewCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
     overviewCtx.setTransform(dpr,0,0,dpr,0,0);
     overviewCtx.clearRect(0,0,rect.width,rect.height);
-    const bounds = navigationBounds();
-    const span = Math.max(.0001, bounds.max-bounds.min);
-    overviewCtx.globalAlpha = .78;
-    const enabled = state.events.filter(e => state.enabledCategories.has(e.category));
-    enabled.filter(e => e.elementType === 'Period' && e.end != null).forEach((e, index) => {
-      const x = ((e.start-bounds.min)/span)*rect.width;
-      const x2=((e.end-bounds.min)/span)*rect.width;
-      overviewCtx.fillStyle = e.color;
-      overviewCtx.fillRect(x, 28 + (index % 2) * 7, Math.max(1,x2-x), 5);
-    });
-    enabled.filter(e => e.elementType !== 'Period').forEach((e, index) => {
-      const x = ((e.start-bounds.min)/span)*rect.width;
-      overviewCtx.fillStyle = e.color;
-      const y = 7 + (index % 3) * 6;
-      overviewCtx.fillRect(x, y, 2, 14);
-    });
+
+    const dataMin = state.minTime;
+    const dataMax = Math.max(state.minTime + .0001, state.maxTime);
+    const span = Math.max(.0001, dataMax - dataMin);
+    const allEvents = state.events.filter(event => event.elementType !== 'Title');
+    const periods = allEvents.filter(event => event.elementType === 'Period' && Number.isFinite(event.end));
+    const points = allEvents.filter(event => event.elementType !== 'Period');
+    const vertical = isPhoneVerticalMode();
+    const leftHandle = overviewWindow.querySelector('[data-overview-handle="left"], [data-overview-handle="top"]');
+    const rightHandle = overviewWindow.querySelector('[data-overview-handle="right"], [data-overview-handle="bottom"]');
+    if (leftHandle) leftHandle.dataset.overviewHandle = vertical ? 'top' : 'left';
+    if (rightHandle) rightHandle.dataset.overviewHandle = vertical ? 'bottom' : 'right';
+
+    overviewCtx.globalAlpha = .84;
+
+    if (vertical) {
+      const pointLeft = 3;
+      const pointArea = Math.max(10, rect.width * .48);
+      const periodLeft = Math.max(pointLeft + pointArea + 2, rect.width * .58);
+      const periodArea = Math.max(5, rect.width - periodLeft - 2);
+
+      points.forEach((event, index) => {
+        const y = ((event.start - dataMin) / span) * rect.height;
+        const lanes = 3;
+        const laneWidth = pointArea / lanes;
+        const x = pointLeft + (index % lanes) * laneWidth;
+        overviewCtx.fillStyle = event.color;
+        overviewCtx.fillRect(
+          x,
+          Math.max(0, Math.min(rect.height - 1, y)),
+          Math.max(2, laneWidth - 1),
+          2
+        );
+      });
+
+      periods.forEach((event, index) => {
+        const y1 = ((event.start - dataMin) / span) * rect.height;
+        const y2 = ((event.end - dataMin) / span) * rect.height;
+        const lanes = Math.max(1, Math.min(3, periods.length));
+        const laneWidth = Math.max(2, periodArea / lanes);
+        const x = periodLeft + (index % lanes) * laneWidth;
+        overviewCtx.fillStyle = event.color;
+        overviewCtx.fillRect(
+          x,
+          Math.max(0, Math.min(rect.height, y1)),
+          Math.max(2, laneWidth - 1),
+          Math.max(1, Math.min(rect.height, y2) - Math.max(0, y1))
+        );
+      });
+
+      const top = ((state.viewStart - dataMin) / span) * rect.height;
+      const bottom = ((state.viewEnd - dataMin) / span) * rect.height;
+      const clampedTop = Math.max(0, Math.min(rect.height, top));
+      const clampedBottom = Math.max(0, Math.min(rect.height, bottom));
+      overviewWindow.style.left = '0px';
+      overviewWindow.style.width = '100%';
+      overviewWindow.style.top = `${clampedTop}px`;
+      overviewWindow.style.height = `${Math.max(10, clampedBottom - clampedTop)}px`;
+    } else {
+      const h = Math.max(1, rect.height);
+      const pointTop = Math.max(2, h * .08);
+      const pointArea = Math.max(8, h * .46);
+      const periodTop = Math.max(pointTop + pointArea + 2, h * .60);
+      const periodArea = Math.max(6, h - periodTop - 2);
+
+      points.forEach((event, index) => {
+        const x = ((event.start - dataMin) / span) * rect.width;
+        const lanes = 3;
+        const lane = index % lanes;
+        const y = pointTop + lane * (pointArea / lanes);
+        overviewCtx.fillStyle = event.color;
+        overviewCtx.fillRect(Math.max(0, Math.min(rect.width - 1, x)), y, 2, Math.max(5, pointArea / lanes - 1));
+      });
+
+      periods.forEach((event, index) => {
+        const x1 = ((event.start - dataMin) / span) * rect.width;
+        const x2 = ((event.end - dataMin) / span) * rect.width;
+        const lanes = Math.max(1, Math.min(3, periods.length));
+        const laneHeight = Math.max(2, periodArea / lanes);
+        const y = periodTop + (index % lanes) * laneHeight;
+        overviewCtx.fillStyle = event.color;
+        overviewCtx.fillRect(
+          Math.max(0, Math.min(rect.width, x1)),
+          y,
+          Math.max(1, Math.min(rect.width, x2) - Math.max(0, x1)),
+          Math.max(2, laneHeight - 1)
+        );
+      });
+
+      const left = ((state.viewStart - dataMin) / span) * rect.width;
+      const right = ((state.viewEnd - dataMin) / span) * rect.width;
+      const clampedLeft = Math.max(0, Math.min(rect.width, left));
+      const clampedRight = Math.max(0, Math.min(rect.width, right));
+      overviewWindow.style.top = '';
+      overviewWindow.style.height = '';
+      overviewWindow.style.left = `${clampedLeft}px`;
+      overviewWindow.style.width = `${Math.max(8, clampedRight - clampedLeft)}px`;
+    }
+
     overviewCtx.globalAlpha = 1;
-    const left = ((state.viewStart-bounds.min)/span)*rect.width;
-    const right = ((state.viewEnd-bounds.min)/span)*rect.width;
-    overviewWindow.style.left = `${Math.max(0,left)}px`;
-    overviewWindow.style.width = `${Math.max(8,Math.min(rect.width, right)-Math.max(0,left))}px`;
   }
 
   function roundRect(context, x, y, width, height, radius) {

@@ -17,113 +17,128 @@
   <header class="app-header">
     <div class="brand-block">
       <h1>Chrona</h1>
-      <div class="subtitle">Interactive Timeline Explorer</div>
+      <div class="subtitle" data-i18n="app.subtitle">Interactive Timeline Explorer</div>
       <p id="status">Loading timeline data…</p>
     </div>
     <div class="header-actions">
-      <div id="sheetControl" class="sheet-control" role="group" aria-label="Google Sheet source">
-        <button id="sheetToggle" class="header-icon-toggle" type="button" title="Sheet URL" aria-label="Open Sheet URL" aria-expanded="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h9l5 5V20.5H5z"></path><path d="M14 3.5v5h5"></path><path d="M8 13h8M8 16h8"></path></svg>
-        </button>
-        <label class="sheet-url header-field" for="sheetUrl">
-          <input id="sheetUrl" type="url" spellcheck="false" aria-label="Sheet URL" />
-        </label>
-        <button id="reloadData" type="button">Reload</button>
-      </div>
-      <div class="search-control" role="group" aria-label="Timeline search">
-        <button id="searchToggle" class="search-toggle" type="button" title="Search timeline" aria-label="Open search" aria-expanded="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
-        </button>
-        <label class="search-box header-field" for="timelineSearch">
-          <input id="timelineSearch" type="search" placeholder="Event, group, or year" autocomplete="off" />
-        </label>
-        <div id="searchResults" class="search-results" hidden>
-          <button id="searchPrevious" type="button" title="Previous result" aria-label="Previous search result">‹</button>
-          <span id="searchResultCount" aria-live="polite">0 / 0</span>
-          <button id="searchNext" type="button" title="Next result" aria-label="Next search result">›</button>
+      <div class="header-icon-row">
+        <div class="viewport-debug-controls" role="group" aria-label="Preview screen size">
+          <button type="button" class="viewport-debug-button" data-preview-size="phone" title="Phone preview" aria-label="Phone preview">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"></rect><path d="M10 5h4"></path><circle cx="12" cy="19" r=".6"></circle></svg>
+          </button>
+          <button type="button" class="viewport-debug-button" data-preview-size="tablet" title="Tablet preview" aria-label="Tablet preview">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2.5" width="14" height="19" rx="2"></rect><circle cx="12" cy="18.5" r=".7"></circle></svg>
+          </button>
+          <button type="button" class="viewport-debug-button is-active" data-preview-size="computer" title="Computer preview" aria-label="Computer preview">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"></rect><path d="M8 20h8M12 16v4"></path></svg>
+          </button>
         </div>
+        <div class="search-shell">
+          <button id="searchToggle" class="search-toggle header-square-button" type="button" title="Search timeline" aria-label="Open search" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
+          </button>
+          <div class="search-control" role="group" aria-label="Timeline search">
+            <label class="search-box header-field" for="timelineSearch">
+              <input id="timelineSearch" type="search" placeholder="Event, group, or year" data-i18n-placeholder="search.placeholder" autocomplete="off" />
+            </label>
+            <div id="searchResults" class="search-results" hidden>
+              <button id="searchPrevious" type="button" title="Previous result" aria-label="Previous search result">‹</button>
+              <span id="searchResultCount" aria-live="polite">0/0</span>
+              <button id="searchNext" type="button" title="Next result" aria-label="Next search result">›</button>
+            </div>
+          </div>
+        </div>
+        <button id="settingsToggle" class="settings-toggle header-square-button" type="button" title="Settings" aria-label="Open settings" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"></path><path d="M19.2 13.3a7.6 7.6 0 0 0 0-2.6l2-1.5-2-3.4-2.4 1a7.8 7.8 0 0 0-2.2-1.3L14.3 3h-4.1l-.4 2.5a7.8 7.8 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.5a7.6 7.6 0 0 0 0 2.6l-2 1.5 2 3.4 2.4-1a7.8 7.8 0 0 0 2.2 1.3l.4 2.5h4.1l.4-2.5a7.8 7.8 0 0 0 2.2-1.3l2.4 1 2-3.4-2.1-1.5Z"></path></svg>
+        </button>
       </div>
-      <button id="settingsToggle" class="settings-toggle" type="button" title="Settings" aria-label="Open settings" aria-expanded="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"></path><path d="M19.2 13.3a7.6 7.6 0 0 0 0-2.6l2-1.5-2-3.4-2.4 1a7.8 7.8 0 0 0-2.2-1.3L14.3 3h-4.1l-.4 2.5a7.8 7.8 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.5a7.6 7.6 0 0 0 0 2.6l-2 1.5 2 3.4 2.4-1a7.8 7.8 0 0 0 2.2 1.3l.4 2.5h4.1l.4-2.5a7.8 7.8 0 0 0 2.2-1.3l2.4 1 2-3.4-2.1-1.5Z"></path></svg>
-      </button>
     </div>
   </header>
 
 
   <div id="settingsBackdrop" class="settings-backdrop" hidden></div>
-  <aside id="settingsPanel" class="settings-panel" hidden aria-label="Chrona settings" aria-modal="true" role="dialog">
+  <aside id="settingsPanel" class="settings-panel settings-panel-compact" hidden aria-label="Chrona settings" aria-modal="true" role="dialog">
     <div class="settings-heading">
-      <div>
-        <h2>Settings</h2>
-        <p>Appearance changes apply immediately.</p>
-      </div>
+      <h2 data-i18n="settings.title">Settings</h2>
       <button id="settingsClose" class="settings-close" type="button" aria-label="Close settings">×</button>
     </div>
 
-    <section class="settings-section" aria-labelledby="sheetSourceHeading">
-      <h3 id="sheetSourceHeading">Default Google Sheet</h3>
+    <section class="settings-section settings-sheet-section" aria-labelledby="sheetSourceHeading">
+      <h3 id="sheetSourceHeading" data-i18n="settings.googleSheet">Google Sheet URL</h3>
       <div class="default-sheet-settings">
-        <label for="defaultSheetUrl">Saved only in this browser</label>
-        <input id="defaultSheetUrl" type="url" spellcheck="false" placeholder="Paste a Google Sheet URL" aria-describedby="defaultSheetHelp" />
-        <p id="defaultSheetHelp">This default is stored locally on this device. The Sheet URL in the top banner remains temporary unless you save it here.</p>
-        <div class="default-sheet-actions">
-          <button id="useCurrentSheetUrl" type="button">Use banner URL</button>
-          <button id="saveDefaultSheetUrl" type="button">Save default</button>
-          <button id="clearDefaultSheetUrl" type="button">Clear</button>
-        </div>
+        <input id="defaultSheetUrl" type="url" spellcheck="false" placeholder="Paste a Google Sheet URL" data-i18n-placeholder="sheet.placeholder" aria-label="Google Sheet URL" />
+        <button id="saveDefaultSheetUrl" type="button" data-i18n="actions.save">Save</button>
         <div id="defaultSheetStatus" class="default-sheet-status" role="status" aria-live="polite"></div>
       </div>
     </section>
 
     <section class="settings-section" aria-labelledby="timelineStyleHeading">
-      <h3 id="timelineStyleHeading">Timeline style</h3>
+      <h3 id="timelineStyleHeading" data-i18n="settings.timelineStyle">Timeline style</h3>
       <div class="style-options" role="radiogroup" aria-label="Timeline style">
+        <button class="style-option" data-visual-theme-value="ai" type="button" role="radio" aria-checked="false">
+          <span class="style-preview style-preview-ai" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span><strong>AI</strong><small>White blocks with group-colored text and blue-to-pink frames</small></span>
+          <b aria-hidden="true">✓</b>
+        </button>
         <button class="style-option" data-visual-theme-value="gradient" type="button" role="radio" aria-checked="false">
           <span class="style-preview style-preview-gradient" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span><strong>Gradient</strong><small>Current colorful, dimensional style</small></span>
+          <span><strong>Gradient</strong><small>Colorful dimensional style</small></span>
           <b aria-hidden="true">✓</b>
         </button>
         <button class="style-option" data-visual-theme-value="flat" type="button" role="radio" aria-checked="false">
           <span class="style-preview style-preview-flat" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span><strong>Flat</strong><small>Light fills, dark borders, colored text</small></span>
+          <span><strong>Flat</strong><small>Light fills and colored borders</small></span>
           <b aria-hidden="true">✓</b>
         </button>
         <button class="style-option" data-visual-theme-value="metro" type="button" role="radio" aria-checked="false">
           <span class="style-preview style-preview-metro" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span><strong>Metro</strong><small>Colored text with a crisp left rule</small></span>
+          <span><strong>Metro</strong><small>Colored text with a left rule</small></span>
           <b aria-hidden="true">✓</b>
         </button>
       </div>
     </section>
 
     <section class="settings-section" aria-labelledby="colorModeHeading">
-      <h3 id="colorModeHeading">Color mode</h3>
+      <h3 id="colorModeHeading" data-i18n="settings.colorMode">Color mode</h3>
       <div class="theme-control" role="group" aria-label="Color mode">
         <button class="theme-option" data-theme-value="light" type="button" title="Light mode">☀︎ <span>Light</span></button>
         <button class="theme-option" data-theme-value="auto" type="button" title="Follow system appearance">◐ <span>Auto</span></button>
         <button class="theme-option" data-theme-value="dark" type="button" title="Dark mode">☾ <span>Dark</span></button>
       </div>
     </section>
+
+    <section class="settings-section settings-language-section" aria-labelledby="languageHeading">
+      <div class="settings-language-row">
+        <h3 id="languageHeading" data-i18n="settings.languageHeading">Language</h3>
+        <select id="languageSelect" aria-label="Display language">
+          <option value="en-US">English (EN)</option>
+          <option value="zh-TW">繁體中文 (TC)</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="settings-section settings-version-section">
+      <div class="settings-version-row">
+        <span data-i18n="settings.version">Version</span>
+        <code id="appVersion">v2.0.63</code>
+      </div>
+    </section>
   </aside>
 
   <section class="toolbar">
     <div class="above-sets-control">
-      <span class="above-sets-label">Above sets</span>
+      <span class="above-sets-label" data-i18n="toolbar.aboveSets">Primary</span>
       <button id="aboveSetsButton" class="above-sets-button" type="button" aria-haspopup="dialog" aria-expanded="false">
-        <span id="aboveSetsSummary">Choose groups</span><span aria-hidden="true">▾</span>
+        <span id="aboveSetsSummary">Choose groups</span>
       </button>
       <div id="aboveSetsMenu" class="above-sets-menu" hidden role="dialog" aria-label="Choose groups shown above the timeline">
-        <div class="above-sets-menu-header">
-          <strong>Above sets</strong>
-          <span id="aboveSetsCount"></span>
-        </div>
-        <input id="aboveSetsSearch" class="category-search" type="search" placeholder="Search groups" autocomplete="off" aria-label="Search groups" />
-        <div id="aboveSetsList" class="category-filters"></div>
+<div id="aboveSetsList" class="category-filters"></div>
+        <div class="above-sets-menu-footer"><button id="aboveSetsSave" type="button">Save</button></div>
       </div>
     </div>
 
     <div class="visible-sets-control">
-      <span class="visible-sets-label">Visible</span>
+      <span class="visible-sets-label" data-i18n="toolbar.visible">Visible</span>
       <div id="categoryQuickFilters" class="category-quick-filters" aria-label="Visible timeline group toggles"></div>
     </div>
   </section>
@@ -140,7 +155,10 @@
       </aside>
       <div id="laneCaptionTop" class="lane-caption lane-caption-top"></div>
       <div id="laneCaptionBottom" class="lane-caption lane-caption-bottom"></div>
-      <div id="yearCursor" class="year-cursor" hidden aria-hidden="true"><div id="yearCursorLabel" class="year-cursor-label"></div></div>
+      <div id="yearCursor" class="year-cursor" hidden aria-hidden="true">
+        <div id="yearCursorLabel" class="year-cursor-label"></div>
+        <div id="yearCursorRelative" class="year-cursor-relative"></div>
+      </div>
       <div class="zoom-rail" aria-label="Timeline zoom controls">
         <button id="zoomIn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
         <button id="zoomOut" type="button" title="Zoom out" aria-label="Zoom out">−</button>
@@ -149,7 +167,7 @@
       </div>
     </div>
     <section id="overviewNavigator" class="overview-navigator" aria-label="Timeline overview; click or drag to move, drag the handles to zoom, double-click for full extent" title="Click to jump, drag the window to pan, drag either edge to zoom, double-click to show the full timeline">
-      <div class="overview-heading"><span>Timeline overview</span><span>Drag window to pan · drag edges to zoom</span></div>
+      <div class="overview-heading"><span data-i18n="overview.title">Timeline overview</span><span data-i18n="overview.help">Drag window to pan · drag edges to zoom</span></div>
       <div class="overview-track">
         <canvas id="overviewCanvas"></canvas>
         <div id="overviewWindow" class="overview-window">
