@@ -1,0 +1,14 @@
+Always use this method to preserve ".git" don't replace whole repo folder on new version developed.
+
+Copy the ZIP into your existing Chrona repo.
+
+Run:
+
+unzip -o chrona-v2.1.16.zip
+rm chrona-v2.1.16.zip
+git status
+Commit and push.
+
+
+-----------
+python3 -m http.server 8000

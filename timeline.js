@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '2.1.15';
+  const APP_VERSION = '2.1.17';
 
   const DEFAULT_SHEET_STORAGE_KEY = 'chrona-default-sheet-url';
   const DEFAULT_EVENT_GID = 681184261;
