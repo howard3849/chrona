@@ -35,10 +35,10 @@
   bottom: auto;
 }
 .timeline-viewport:not(.is-phone-vertical) .year-cursor-label {
-  right: 7px;
-  transform: translateX(-100%);
+  right: 5px;
+  transform: none;
 }
-.timeline-viewport:not(.is-phone-vertical) .year-cursor-relative { left: 7px; }
+.timeline-viewport:not(.is-phone-vertical) .year-cursor-relative { left: 5px; }
 
 /* Phone: labels sit at the right endpoint, year above and relative age below. */
 .timeline-viewport.is-phone-vertical .year-cursor {

@@ -4,11 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Chrona — Interactive Timeline Explorer</title>
-  <link rel="stylesheet" href="styles.css?v=2.1.11">
-  <link rel="stylesheet" href="css/theme-colors.css?v=2.1.11">
-  <link rel="stylesheet" href="css/search.css?v=2.1.11">
-  <link rel="stylesheet" href="css/year-ruler.css?v=2.1.11">
-  <link rel="stylesheet" href="css/phone-period.css?v=2.1.11">
+  <link rel="stylesheet" href="styles.css?v=2.1.15">
+  <link rel="stylesheet" href="css/theme-colors.css?v=2.1.15">
+  <link rel="stylesheet" href="css/search.css?v=2.1.15">
+  <link rel="stylesheet" href="css/year-ruler.css?v=2.1.15">
+  <link rel="stylesheet" href="css/phone-period.css?v=2.1.15">
 </head>
 <body>
   <header class="app-header">
@@ -37,12 +37,12 @@
           <div class="search-control" role="group" aria-label="Timeline search">
             <label class="search-box header-field" for="timelineSearch">
               <input id="timelineSearch" type="search" placeholder="Event, group, or year" data-i18n-placeholder="search.placeholder" autocomplete="off" />
+              <span id="searchResults" class="search-results" hidden>
+                <span id="searchResultCount" aria-live="polite">0/0</span>
+              </span>
             </label>
-            <div id="searchResults" class="search-results" hidden>
-              <span id="searchResultCount" aria-live="polite">0/0</span>
-              <button id="searchPrevious" type="button" title="Previous result" aria-label="Previous search result">‹</button>
-              <button id="searchNext" type="button" title="Next result" aria-label="Next search result">›</button>
-            </div>
+            <button id="searchPrevious" class="search-navigation-button" type="button" title="Previous result" aria-label="Previous search result">‹</button>
+            <button id="searchNext" class="search-navigation-button" type="button" title="Next result" aria-label="Next search result">›</button>
             <button id="searchClose" class="search-close" type="button" title="Close search" aria-label="Close search">×</button>
           </div>
         </div>
@@ -118,7 +118,7 @@
     <section class="settings-section settings-version-section">
       <div class="settings-version-row">
         <span data-i18n="settings.version">Version</span>
-        <code id="appVersion">v2.1.2</code>
+        <code id="appVersion">v2.1.15</code>
       </div>
     </section>
   </aside>
@@ -183,6 +183,7 @@
     </label>
   </template>
 
-  <script defer src="timeline.js?v=2.1.11"></script>
+  <script defer src="js/year-ruler.js?v=2.1.15"></script>
+  <script defer src="timeline.js?v=2.1.15"></script>
 </body>
 </html>

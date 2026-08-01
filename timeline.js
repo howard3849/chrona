@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '2.1.11';
+  const APP_VERSION = '2.1.15';
 
   const DEFAULT_SHEET_STORAGE_KEY = 'chrona-default-sheet-url';
   const DEFAULT_EVENT_GID = 681184261;
@@ -777,6 +777,7 @@
     localStorage.setItem('chrona.previewSize', normalized);
     window.dispatchEvent(new Event('resize'));
     scheduleRender();
+    requestAnimationFrame(syncYearCursorForCurrentMode);
   }
   viewportDebugButtons.forEach(button => {
     button.addEventListener('click', event => {
@@ -1984,7 +1985,7 @@
         rail.innerHTML = `
           <svg class="mobile-period-frame" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
             <defs>
-              <linearGradient id="${svgGradientId}" x1="0" y1="0" x2="100" y2="0" gradientUnits="userSpaceOnUse">
+              <linearGradient id="${svgGradientId}" x1="0" y1="0" x2="0" y2="100" gradientUnits="userSpaceOnUse">
                 <stop offset="0%" stop-color="#168cff"></stop>
                 <stop offset="48%" stop-color="#6f63ff"></stop>
                 <stop offset="100%" stop-color="#ff3d9a"></stop>
@@ -2160,6 +2161,48 @@
       clientY >= rect.top && clientY <= rect.bottom);
   }
 
+  function syncYearCursorForCurrentMode() {
+    if (yearCursor.hidden || !Number.isFinite(state.cursorYear)) return;
+
+    const rect = viewport.getBoundingClientRect();
+    const yearText = formatCursorYear(state.cursorYear);
+    const relativeText = formatRelativeYears(state.cursorYear);
+
+    if (isPhoneVerticalMode()) {
+      const topPad = 28;
+      const bottomPad = 30;
+      const usableHeight = Math.max(1, rect.height - topPad - bottomPad);
+      const ratio = Math.max(0, Math.min(1,
+        (state.cursorYear - state.viewStart) / Math.max(0.000001, state.viewEnd - state.viewStart)
+      ));
+      state.cursorY = topPad + ratio * usableHeight;
+      state.cursorX = null;
+      window.ChronaYearRuler?.showPhoneYearRuler({
+        ruler: yearCursor,
+        label: yearCursorLabel,
+        relative: yearCursorRelative,
+        y: state.cursorY,
+        yearText,
+        relativeText
+      });
+      return;
+    }
+
+    const ratio = Math.max(0, Math.min(1,
+      (state.cursorYear - state.viewStart) / Math.max(0.000001, state.viewEnd - state.viewStart)
+    ));
+    state.cursorX = ratio * rect.width;
+    state.cursorY = null;
+    window.ChronaYearRuler?.showDesktopYearRuler({
+      ruler: yearCursor,
+      label: yearCursorLabel,
+      relative: yearCursorRelative,
+      x: state.cursorX,
+      yearText,
+      relativeText
+    });
+  }
+
   function updateYearCursor(event) {
     if (isPhoneVerticalMode()) {
       const rect = viewport.getBoundingClientRect();
@@ -2169,11 +2212,15 @@
       state.cursorY = Math.max(topPad, Math.min(rect.height - bottomPad, event.clientY - rect.top));
       const ratio = (state.cursorY - topPad) / usableHeight;
       state.cursorYear = state.viewStart + ratio * (state.viewEnd - state.viewStart);
-      yearCursor.style.top = `${state.cursorY}px`;
-      yearCursor.style.left = '0px';
-      yearCursorLabel.textContent = formatCursorYear(state.cursorYear);
-      yearCursorRelative.textContent = formatRelativeYears(state.cursorYear);
-      yearCursor.hidden = false;
+      state.cursorX = null;
+      window.ChronaYearRuler?.showPhoneYearRuler({
+        ruler: yearCursor,
+        label: yearCursorLabel,
+        relative: yearCursorRelative,
+        y: state.cursorY,
+        yearText: formatCursorYear(state.cursorYear),
+        relativeText: formatRelativeYears(state.cursorYear)
+      });
       scheduleRender();
       return;
     }
@@ -2194,19 +2241,15 @@
     state.cursorX = x;
     state.cursorYear = year;
 
-    // Phone mode positions the horizontal cursor with an inline `top` value.
-    // Clear that mode-specific geometry before drawing the desktop vertical
-    // ruler, otherwise its top endpoint—and therefore both labels—can remain
-    // stranded in the middle of the canvas after a mode/preview switch.
-    yearCursor.style.top = '0px';
-    yearCursor.style.bottom = '0px';
-    yearCursor.style.right = 'auto';
-    yearCursor.style.height = 'auto';
-    yearCursor.style.width = '0px';
-    yearCursor.style.left = `${x}px`;
-    yearCursorLabel.textContent = formatCursorYear(year);
-    yearCursorRelative.textContent = formatRelativeYears(year);
-    yearCursor.hidden = false;
+    state.cursorY = null;
+    window.ChronaYearRuler?.showDesktopYearRuler({
+      ruler: yearCursor,
+      label: yearCursorLabel,
+      relative: yearCursorRelative,
+      x,
+      yearText: formatCursorYear(year),
+      relativeText: formatRelativeYears(year)
+    });
     scheduleRender();
   }
 
@@ -3671,9 +3714,9 @@
 
     if (vertical) {
       const pointLeft = 3;
-      const pointArea = Math.max(10, rect.width * .48);
-      const periodLeft = Math.max(pointLeft + pointArea + 2, rect.width * .58);
-      const periodArea = Math.max(5, rect.width - periodLeft - 2);
+      const pointArea = Math.max(10, rect.width * .42);
+      const periodLeft = Math.max(pointLeft + pointArea + 2, rect.width * .52);
+      const periodArea = Math.max(8, rect.width - periodLeft - 2);
 
       points.forEach((event, index) => {
         const y = ((event.start - dataMin) / span) * rect.height;
@@ -3689,20 +3732,39 @@
         );
       });
 
-      periods.forEach((event, index) => {
-        const y1 = ((event.start - dataMin) / span) * rect.height;
-        const y2 = ((event.end - dataMin) / span) * rect.height;
-        const lanes = Math.max(1, Math.min(3, periods.length));
-        const laneWidth = Math.max(2, periodArea / lanes);
-        const x = periodLeft + (index % lanes) * laneWidth;
-        overviewCtx.fillStyle = event.color;
-        overviewCtx.fillRect(
-          x,
-          Math.max(0, Math.min(rect.height, y1)),
-          Math.max(2, laneWidth - 1),
-          Math.max(1, Math.min(rect.height, y2) - Math.max(0, y1))
-        );
-      });
+      // Phone radar uses the same current primary/reference roles as the main
+      // timeline. Primary periods occupy the inner band; reference periods use
+      // the outer band. Lane membership is rebuilt on every draw, so changing
+      // the primary timeline or crossing a responsive breakpoint cannot leave
+      // stale miniature bars behind.
+      const primaryPeriods = periods.filter(event => isPrimaryCategory(event.category));
+      const referencePeriods = periods.filter(event => !isPrimaryCategory(event.category));
+      const drawVerticalPeriodBand = (events, bandLeft, bandWidth) => {
+        if (!events.length || bandWidth <= 0) return;
+        const categories = [...new Set(events.map(event => normalizeGroupKey(event.category)))];
+        const railWidth = Math.max(3, Math.min(6, rect.width * .055));
+        const railGap = 2;
+        const totalWidth = categories.length * railWidth + Math.max(0, categories.length - 1) * railGap;
+        const firstX = bandLeft + Math.max(0, (bandWidth - totalWidth) / 2);
+        events.forEach(event => {
+          const y1 = ((event.start - dataMin) / span) * rect.height;
+          const y2 = ((event.end - dataMin) / span) * rect.height;
+          const lane = Math.max(0, categories.indexOf(normalizeGroupKey(event.category)));
+          const x = firstX + lane * (railWidth + railGap);
+          overviewCtx.fillStyle = event.color;
+          overviewCtx.fillRect(
+            x,
+            Math.max(0, Math.min(rect.height, y1)),
+            railWidth,
+            Math.max(1, Math.min(rect.height, y2) - Math.max(0, y1))
+          );
+        });
+      };
+      const roleGap = 2;
+      const primaryBandWidth = Math.max(3, (periodArea - roleGap) * .48);
+      const referenceBandLeft = periodLeft + primaryBandWidth + roleGap;
+      drawVerticalPeriodBand(primaryPeriods, periodLeft, primaryBandWidth);
+      drawVerticalPeriodBand(referencePeriods, referenceBandLeft, Math.max(3, rect.width - referenceBandLeft - 2));
 
       const top = ((state.viewStart - dataMin) / span) * rect.height;
       const bottom = ((state.viewEnd - dataMin) / span) * rect.height;
@@ -3714,10 +3776,13 @@
       overviewWindow.style.height = `${Math.max(10, clampedBottom - clampedTop)}px`;
     } else {
       const h = Math.max(1, rect.height);
-      const pointTop = Math.max(2, h * .08);
-      const pointArea = Math.max(8, h * .46);
-      const periodTop = Math.max(pointTop + pointArea + 2, h * .60);
-      const periodArea = Math.max(6, h - periodTop - 2);
+      const centerGap = Math.max(2, h * .06);
+      const primaryTop = 2;
+      const primaryArea = Math.max(5, h * .36);
+      const pointTop = primaryTop + primaryArea + centerGap;
+      const pointArea = Math.max(6, h * .20);
+      const referenceTop = pointTop + pointArea + centerGap;
+      const referenceArea = Math.max(5, h - referenceTop - 2);
 
       points.forEach((event, index) => {
         const x = ((event.start - dataMin) / span) * rect.width;
@@ -3725,23 +3790,46 @@
         const lane = index % lanes;
         const y = pointTop + lane * (pointArea / lanes);
         overviewCtx.fillStyle = event.color;
-        overviewCtx.fillRect(Math.max(0, Math.min(rect.width - 1, x)), y, 2, Math.max(5, pointArea / lanes - 1));
+        overviewCtx.fillRect(Math.max(0, Math.min(rect.width - 1, x)), y, 2, Math.max(2, pointArea / lanes - 1));
       });
 
-      periods.forEach((event, index) => {
-        const x1 = ((event.start - dataMin) / span) * rect.width;
-        const x2 = ((event.end - dataMin) / span) * rect.width;
-        const lanes = Math.max(1, Math.min(3, periods.length));
-        const laneHeight = Math.max(2, periodArea / lanes);
-        const y = periodTop + (index % lanes) * laneHeight;
-        overviewCtx.fillStyle = event.color;
-        overviewCtx.fillRect(
-          Math.max(0, Math.min(rect.width, x1)),
-          y,
-          Math.max(1, Math.min(rect.width, x2) - Math.max(0, x1)),
-          Math.max(2, laneHeight - 1)
-        );
-      });
+      // Desktop and iPad radar: primary periods are always drawn above the
+      // center point band and references below it. Category lanes are derived
+      // from the live aboveGroups state on every render rather than from the
+      // original event order.
+      const drawHorizontalPeriodBand = (events, bandTop, bandHeight) => {
+        if (!events.length || bandHeight <= 0) return;
+        const categories = [...new Set(events.map(event => normalizeGroupKey(event.category)))];
+        // Every period is represented by the same fixed-height miniature bar.
+        // A role with only one category must not expand to fill its entire band.
+        const barHeight = Math.max(3, Math.min(6, h * .075));
+        const barGap = 2;
+        const totalHeight = categories.length * barHeight + Math.max(0, categories.length - 1) * barGap;
+        const firstY = bandTop + Math.max(0, (bandHeight - totalHeight) / 2);
+        events.forEach(event => {
+          const x1 = ((event.start - dataMin) / span) * rect.width;
+          const x2 = ((event.end - dataMin) / span) * rect.width;
+          const lane = Math.max(0, categories.indexOf(normalizeGroupKey(event.category)));
+          const y = firstY + lane * (barHeight + barGap);
+          overviewCtx.fillStyle = event.color;
+          overviewCtx.fillRect(
+            Math.max(0, Math.min(rect.width, x1)),
+            y,
+            Math.max(1, Math.min(rect.width, x2) - Math.max(0, x1)),
+            barHeight
+          );
+        });
+      };
+      drawHorizontalPeriodBand(
+        periods.filter(event => isPrimaryCategory(event.category)),
+        primaryTop,
+        primaryArea
+      );
+      drawHorizontalPeriodBand(
+        periods.filter(event => !isPrimaryCategory(event.category)),
+        referenceTop,
+        referenceArea
+      );
 
       const left = ((state.viewStart - dataMin) / span) * rect.width;
       const right = ((state.viewEnd - dataMin) / span) * rect.width;

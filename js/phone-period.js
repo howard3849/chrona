@@ -19,8 +19,8 @@ function makeGradient(svg, id) {
   gradient.id = id;
   gradient.setAttribute('x1', '0');
   gradient.setAttribute('y1', '0');
-  gradient.setAttribute('x2', '100');
-  gradient.setAttribute('y2', '0');
+  gradient.setAttribute('x2', '0');
+  gradient.setAttribute('y2', '100');
   gradient.setAttribute('gradientUnits', 'userSpaceOnUse');
 
   for (const [offset, color] of [['0%', '#168cff'], ['48%', '#6f63ff'], ['100%', '#ff3d9a']]) {
