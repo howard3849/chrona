@@ -5634,3 +5634,42 @@ html[data-preview-size="phone"] .timeline-viewport.is-phone-vertical .event-labe
 
 
 
+
+/* First-run sample-data notice */
+.onboarding-notice {
+  margin: 0 18px 10px;
+  padding: 11px 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent, #5b7cfa) 25%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel, #fff) 92%, var(--accent, #5b7cfa) 8%);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.onboarding-notice[hidden] { display: none !important; }
+.onboarding-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.onboarding-actions button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel, #fff);
+  color: var(--text);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.onboarding-actions .onboarding-primary {
+  border-color: transparent;
+  background: var(--accent, #5b7cfa);
+  color: #fff;
+}
+@media (max-width: 760px) {
+  .onboarding-notice { margin: 0 10px 8px; align-items: stretch; flex-direction: column; }
+  .onboarding-actions { width: 100%; }
+  .onboarding-actions button { flex: 1; }
+}

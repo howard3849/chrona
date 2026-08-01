@@ -1,0 +1,6 @@
+.DS_Store
+__MACOSX/
+.chrona-server.pid
+.chrona-server.port
+release/
+*.zip

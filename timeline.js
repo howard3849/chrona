@@ -1,9 +1,10 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '2.1.17';
+  const APP_VERSION = window.CHRONA_VERSION || 'dev';
 
   const DEFAULT_SHEET_STORAGE_KEY = 'chrona-default-sheet-url';
+  const ONBOARDING_DISMISSED_STORAGE_KEY = 'chrona-onboarding-dismissed-v1';
   const DEFAULT_EVENT_GID = 681184261;
   const DEFAULT_CATEGORY_GID = 1068523108;
   const DEFAULT_TRANSLATION_GID = 1376603082;
@@ -79,6 +80,9 @@
   const yearCursorLabel = document.getElementById('yearCursorLabel');
   const yearCursorRelative = document.getElementById('yearCursorRelative');
   const languageSelect = document.getElementById('languageSelect');
+  const onboardingNotice = document.getElementById('onboardingNotice');
+  const onboardingUseSample = document.getElementById('onboardingUseSample');
+  const onboardingAddSheet = document.getElementById('onboardingAddSheet');
 
   const state = {
     events: [],
@@ -511,6 +515,12 @@
   settingsToggle.addEventListener('click', () => toggleSettings());
   settingsClose.addEventListener('click', closeSettings);
   settingsBackdrop.addEventListener('click', closeSettings);
+  onboardingUseSample?.addEventListener('click', dismissOnboardingNotice);
+  onboardingAddSheet?.addEventListener('click', () => {
+    dismissOnboardingNotice();
+    toggleSettings(true);
+    requestAnimationFrame(() => defaultSheetUrlInput?.focus());
+  });
   saveDefaultSheetUrlButton?.addEventListener('click', async () => {
     const value = sheetUrlInput?.value.trim() || '';
     if (!value) {
@@ -521,6 +531,7 @@
     try {
       parseSheetSource(value);
       localStorage.setItem(DEFAULT_SHEET_STORAGE_KEY, value);
+      updateOnboardingNotice();
       defaultSheetStatus.textContent = state.language === 'zh-TW' ? '已儲存，正在載入…' : 'Saved. Loading…';
       await loadTimeline();
       defaultSheetStatus.textContent = state.language === 'zh-TW' ? '已儲存並載入。' : 'Saved and loaded.';
@@ -777,7 +788,6 @@
     localStorage.setItem('chrona.previewSize', normalized);
     window.dispatchEvent(new Event('resize'));
     scheduleRender();
-    requestAnimationFrame(syncYearCursorForCurrentMode);
   }
   viewportDebugButtons.forEach(button => {
     button.addEventListener('click', event => {
@@ -821,12 +831,28 @@
 
   function toggleSettings(forceOpen) {
     const opening = typeof forceOpen === 'boolean' ? forceOpen : settingsPanel.hidden;
+    if (opening && defaultSheetUrlInput) {
+      defaultSheetUrlInput.value = localStorage.getItem(DEFAULT_SHEET_STORAGE_KEY) || '';
+      defaultSheetStatus.textContent = '';
+    }
     settingsPanel.hidden = !opening;
     settingsBackdrop.hidden = !opening;
     settingsToggle.classList.toggle('is-active', opening);
     settingsToggle.setAttribute('aria-expanded', String(opening));
     settingsToggle.setAttribute('aria-label', opening ? 'Close settings' : 'Open settings');
     if (opening) requestAnimationFrame(() => settingsClose.focus());
+  }
+
+  function dismissOnboardingNotice() {
+    localStorage.setItem(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
+    if (onboardingNotice) onboardingNotice.hidden = true;
+  }
+
+  function updateOnboardingNotice() {
+    if (!onboardingNotice) return;
+    const hasSavedSheet = Boolean(localStorage.getItem(DEFAULT_SHEET_STORAGE_KEY));
+    const dismissed = localStorage.getItem(ONBOARDING_DISMISSED_STORAGE_KEY) === 'true';
+    onboardingNotice.hidden = hasSavedSheet || dismissed;
   }
 
   function closeSettings() {
@@ -1011,30 +1037,9 @@
     return /^#[0-9A-F]{6}$/i.test(value || '') ? value : fallback;
   }
 
-  const EMBEDDED_CATEGORIES = [
-    { Group: 'United States', Color: '#2563EB', 'Default Visible': 'TRUE', 'Default Position': 'Above' },
-    { Group: 'China', Color: '#DC2626', 'Default Visible': 'TRUE', 'Default Position': 'Below' },
-    { Group: 'Ancient Rome', Color: '#7C3AED', 'Default Visible': 'TRUE', 'Default Position': 'Below' },
-    { Group: 'Britain', Color: '#D97706', 'Default Visible': 'TRUE', 'Default Position': 'Below' },
-    { Group: 'Germany', Color: '#475569', 'Default Visible': 'TRUE', 'Default Position': 'Below' }
-  ];
-
-  const EMBEDDED_EVENTS = [
-    { Year:'1776', Month:'7', Day:'4', 'Display Date':'July 4, 1776', Headline:'U.S. Declaration of Independence', Text:'The thirteen colonies declared independence from Great Britain.', Media:'https://upload.wikimedia.org/wikipedia/commons/1/15/Declaration_independence.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Declaration of Independence', Group:'United States', Type:'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1776-DECLARATION' },
-    { Year:'1787', Month:'9', Day:'17', 'Display Date':'September 17, 1787', Headline:'U.S. Constitution Signed', Text:'Delegates signed the Constitution in Philadelphia.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/4d/Scene_at_the_Signing_of_the_Constitution_of_the_United_States.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Signing of the U.S. Constitution', Group:'United States', Type:'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1787-CONSTITUTION' },
-    { Year:'1839', 'End Year':'1842', 'Display Date':'1839–1842', Headline:'First Opium War', Text:'Conflict between Qing China and Britain led to the Treaty of Nanking.', Media:'https://upload.wikimedia.org/wikipedia/commons/0/0e/Destroying_Chinese_war_junks%2C_by_E._Duncan_%281843%29.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Naval battle during the First Opium War', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1839-OPIUM-WAR-1' },
-    { Year:'1861', Month:'4', Day:'12', 'End Year':'1865', 'End Month':'4', 'End Day':'9', 'Display Date':'1861–1865', Headline:'American Civil War', Text:'War between the Union and the Confederacy transformed the United States and ended legal slavery.', Media:'https://upload.wikimedia.org/wikipedia/commons/9/9a/Fall_of_Richmond_Va_on_the_night_of_April_2nd_1865.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Richmond during the Civil War', Group:'United States', Type:'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1861-CIVIL-WAR' },
-    { Year:'1911', Month:'10', Day:'10', 'End Year':'1912', 'End Month':'2', 'End Day':'12', 'Display Date':'1911–1912', Headline:'Xinhai Revolution', Text:'The revolution ended imperial rule and led to the establishment of the Republic of China.', Media:'https://upload.wikimedia.org/wikipedia/commons/8/8f/Wuchang_Uprising.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Wuchang Uprising', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1911-XINHAI' },
-    { Year:'1929', Month:'10', Day:'24', 'Display Date':'October 1929', Headline:'Wall Street Crash', Text:'The stock-market collapse became a defining event of the Great Depression.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/4c/Crowd_outside_nyse.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Crowd outside the New York Stock Exchange', Group:'United States', Type:'Event', Position:'Above', Importance:'Medium', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1929-WALL-STREET' },
-    { Year:'1937', Month:'7', Day:'7', 'End Year':'1945', 'End Month':'9', 'End Day':'2', 'Display Date':'1937–1945', Headline:'Second Sino-Japanese War', Text:'Full-scale war between China and Japan became part of the wider Second World War.', Media:'https://upload.wikimedia.org/wikipedia/commons/4/46/Chinese_soldiers_in_house_to_house_fighting_in_Tai%27er_zhuang.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Chinese soldiers during the war', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1937-SINO-JAPANESE-WAR' },
-    { Year:'1949', Month:'10', Day:'1', 'Display Date':'October 1, 1949', Headline:'People’s Republic of China Founded', Text:'Mao Zedong proclaimed the People’s Republic of China in Beijing.', Media:'https://upload.wikimedia.org/wikipedia/commons/5/51/Mao_Zedong_proclaiming_the_establishment_of_the_PRC_in_1949.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Proclamation ceremony in Beijing', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1949-PRC' },
-    { Year:'1969', Month:'7', Day:'20', 'Display Date':'July 20, 1969', Headline:'Apollo 11 Moon Landing', Text:'Neil Armstrong and Buzz Aldrin became the first people to walk on the Moon.', Media:'https://upload.wikimedia.org/wikipedia/commons/9/98/Aldrin_Apollo_11_original.jpg', 'Media Credit':'NASA / Wikimedia Commons', 'Media Caption':'Buzz Aldrin on the Moon', Group:'United States', Type:'Event', Position:'Above', Importance:'Major', Color:'#2563EB', Visible:'TRUE', 'Event ID':'US-1969-APOLLO-11' },
-    { Year:'1978', Month:'12', Day:'18', 'Display Date':'December 1978', Headline:'China Begins Reform and Opening', Text:'The Third Plenum marked the beginning of major economic reform under Deng Xiaoping.', Media:'https://upload.wikimedia.org/wikipedia/commons/5/5c/Deng_Xiaoping_1979.jpg', 'Media Credit':'Wikimedia Commons', 'Media Caption':'Deng Xiaoping', Group:'China', Type:'Event', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1978-REFORM' },
-    { Year:'-27', 'End Year':'476', 'Display Date':'27 BCE–476 CE', Headline:'Roman Empire (Western)', Text:'Reference period spanning the Roman imperial era in the West.', Group:'Ancient Rome', Type:'Period', Position:'Below', Importance:'Major', Color:'#7C3AED', Visible:'TRUE', 'Event ID':'ROME-0027BCE-0476' },
-    { Year:'1707', 'End Year':'1997', 'Display Date':'1707–1997', Headline:'British Empire (broad reference period)', Text:'A simplified reference span for Britain’s imperial period.', Group:'Britain', Type:'Period', Position:'Below', Importance:'Major', Color:'#D97706', Visible:'TRUE', 'Event ID':'GB-1707-1997-EMPIRE' },
-    { Year:'1933', 'End Year':'1945', 'Display Date':'1933–1945', Headline:'Nazi Regime', Text:'Period during which Adolf Hitler and the Nazi Party ruled Germany.', Group:'Germany', Type:'Period', Position:'Below', Importance:'Major', Color:'#475569', Visible:'TRUE', 'Event ID':'DE-1933-1945-NAZI' },
-    { Year:'1644', 'End Year':'1912', 'Display Date':'1644–1912', Headline:'Qing Dynasty', Text:'China’s final imperial dynasty, used here as a long-duration reference block.', Group:'China', Type:'Period', Position:'Below', Importance:'Major', Color:'#DC2626', Visible:'TRUE', 'Event ID':'CN-1644-1912-QING' }
-  ];
+  const SAMPLE_DATA = window.CHRONA_SAMPLE_DATA || { categories: [], events: [] };
+  const EMBEDDED_CATEGORIES = SAMPLE_DATA.categories;
+  const EMBEDDED_EVENTS = SAMPLE_DATA.events;
 
   function applyRows(rawEvents, rawCategories, sourceLabel) {
     state.categories.clear();
@@ -1112,6 +1117,7 @@
   }
 
   async function loadTimeline() {
+    updateOnboardingNotice();
     statusEl.classList.remove('status-warning');
     statusEl.textContent = t('status.loading');
     const requestedUrl = sheetUrlInput.value.trim();
@@ -1119,7 +1125,8 @@
       loadDatasetSettings([]);
       loadTranslations([]);
       loadDictionary([]);
-      applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'embedded offline snapshot');
+      if (!EMBEDDED_EVENTS.length) throw new Error('Sample data is unavailable.');
+      applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'sample timeline');
       setLanguage(state.language, false);
       statusEl.textContent = `${state.events.length} timeline records loaded — add a Google Sheet URL in Settings.`;
       return;
@@ -1196,10 +1203,11 @@
       loadDatasetSettings([]);
       loadTranslations([]);
       loadDictionary([]);
-      applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'embedded offline snapshot');
+      if (!EMBEDDED_EVENTS.length) throw error;
+      applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'sample timeline');
       setLanguage(state.language, false);
       statusEl.classList.add('status-warning');
-      statusEl.textContent = `Live sheet could not be loaded; showing outdated offline data. ${error.message}`;
+      statusEl.textContent = `Google Sheet could not be loaded; showing the bundled sample timeline instead. ${error.message}`;
     }
   }
 
@@ -1985,7 +1993,7 @@
         rail.innerHTML = `
           <svg class="mobile-period-frame" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
             <defs>
-              <linearGradient id="${svgGradientId}" x1="0" y1="0" x2="0" y2="100" gradientUnits="userSpaceOnUse">
+              <linearGradient id="${svgGradientId}" x1="0" y1="0" x2="100" y2="0" gradientUnits="userSpaceOnUse">
                 <stop offset="0%" stop-color="#168cff"></stop>
                 <stop offset="48%" stop-color="#6f63ff"></stop>
                 <stop offset="100%" stop-color="#ff3d9a"></stop>
@@ -2161,48 +2169,6 @@
       clientY >= rect.top && clientY <= rect.bottom);
   }
 
-  function syncYearCursorForCurrentMode() {
-    if (yearCursor.hidden || !Number.isFinite(state.cursorYear)) return;
-
-    const rect = viewport.getBoundingClientRect();
-    const yearText = formatCursorYear(state.cursorYear);
-    const relativeText = formatRelativeYears(state.cursorYear);
-
-    if (isPhoneVerticalMode()) {
-      const topPad = 28;
-      const bottomPad = 30;
-      const usableHeight = Math.max(1, rect.height - topPad - bottomPad);
-      const ratio = Math.max(0, Math.min(1,
-        (state.cursorYear - state.viewStart) / Math.max(0.000001, state.viewEnd - state.viewStart)
-      ));
-      state.cursorY = topPad + ratio * usableHeight;
-      state.cursorX = null;
-      window.ChronaYearRuler?.showPhoneYearRuler({
-        ruler: yearCursor,
-        label: yearCursorLabel,
-        relative: yearCursorRelative,
-        y: state.cursorY,
-        yearText,
-        relativeText
-      });
-      return;
-    }
-
-    const ratio = Math.max(0, Math.min(1,
-      (state.cursorYear - state.viewStart) / Math.max(0.000001, state.viewEnd - state.viewStart)
-    ));
-    state.cursorX = ratio * rect.width;
-    state.cursorY = null;
-    window.ChronaYearRuler?.showDesktopYearRuler({
-      ruler: yearCursor,
-      label: yearCursorLabel,
-      relative: yearCursorRelative,
-      x: state.cursorX,
-      yearText,
-      relativeText
-    });
-  }
-
   function updateYearCursor(event) {
     if (isPhoneVerticalMode()) {
       const rect = viewport.getBoundingClientRect();
@@ -2212,15 +2178,11 @@
       state.cursorY = Math.max(topPad, Math.min(rect.height - bottomPad, event.clientY - rect.top));
       const ratio = (state.cursorY - topPad) / usableHeight;
       state.cursorYear = state.viewStart + ratio * (state.viewEnd - state.viewStart);
-      state.cursorX = null;
-      window.ChronaYearRuler?.showPhoneYearRuler({
-        ruler: yearCursor,
-        label: yearCursorLabel,
-        relative: yearCursorRelative,
-        y: state.cursorY,
-        yearText: formatCursorYear(state.cursorYear),
-        relativeText: formatRelativeYears(state.cursorYear)
-      });
+      yearCursor.style.top = `${state.cursorY}px`;
+      yearCursor.style.left = '0px';
+      yearCursorLabel.textContent = formatCursorYear(state.cursorYear);
+      yearCursorRelative.textContent = formatRelativeYears(state.cursorYear);
+      yearCursor.hidden = false;
       scheduleRender();
       return;
     }
@@ -2241,15 +2203,19 @@
     state.cursorX = x;
     state.cursorYear = year;
 
-    state.cursorY = null;
-    window.ChronaYearRuler?.showDesktopYearRuler({
-      ruler: yearCursor,
-      label: yearCursorLabel,
-      relative: yearCursorRelative,
-      x,
-      yearText: formatCursorYear(year),
-      relativeText: formatRelativeYears(year)
-    });
+    // Phone mode positions the horizontal cursor with an inline `top` value.
+    // Clear that mode-specific geometry before drawing the desktop vertical
+    // ruler, otherwise its top endpoint—and therefore both labels—can remain
+    // stranded in the middle of the canvas after a mode/preview switch.
+    yearCursor.style.top = '0px';
+    yearCursor.style.bottom = '0px';
+    yearCursor.style.right = 'auto';
+    yearCursor.style.height = 'auto';
+    yearCursor.style.width = '0px';
+    yearCursor.style.left = `${x}px`;
+    yearCursorLabel.textContent = formatCursorYear(year);
+    yearCursorRelative.textContent = formatRelativeYears(year);
+    yearCursor.hidden = false;
     scheduleRender();
   }
 
@@ -3714,9 +3680,9 @@
 
     if (vertical) {
       const pointLeft = 3;
-      const pointArea = Math.max(10, rect.width * .42);
-      const periodLeft = Math.max(pointLeft + pointArea + 2, rect.width * .52);
-      const periodArea = Math.max(8, rect.width - periodLeft - 2);
+      const pointArea = Math.max(10, rect.width * .48);
+      const periodLeft = Math.max(pointLeft + pointArea + 2, rect.width * .58);
+      const periodArea = Math.max(5, rect.width - periodLeft - 2);
 
       points.forEach((event, index) => {
         const y = ((event.start - dataMin) / span) * rect.height;
@@ -3732,39 +3698,20 @@
         );
       });
 
-      // Phone radar uses the same current primary/reference roles as the main
-      // timeline. Primary periods occupy the inner band; reference periods use
-      // the outer band. Lane membership is rebuilt on every draw, so changing
-      // the primary timeline or crossing a responsive breakpoint cannot leave
-      // stale miniature bars behind.
-      const primaryPeriods = periods.filter(event => isPrimaryCategory(event.category));
-      const referencePeriods = periods.filter(event => !isPrimaryCategory(event.category));
-      const drawVerticalPeriodBand = (events, bandLeft, bandWidth) => {
-        if (!events.length || bandWidth <= 0) return;
-        const categories = [...new Set(events.map(event => normalizeGroupKey(event.category)))];
-        const railWidth = Math.max(3, Math.min(6, rect.width * .055));
-        const railGap = 2;
-        const totalWidth = categories.length * railWidth + Math.max(0, categories.length - 1) * railGap;
-        const firstX = bandLeft + Math.max(0, (bandWidth - totalWidth) / 2);
-        events.forEach(event => {
-          const y1 = ((event.start - dataMin) / span) * rect.height;
-          const y2 = ((event.end - dataMin) / span) * rect.height;
-          const lane = Math.max(0, categories.indexOf(normalizeGroupKey(event.category)));
-          const x = firstX + lane * (railWidth + railGap);
-          overviewCtx.fillStyle = event.color;
-          overviewCtx.fillRect(
-            x,
-            Math.max(0, Math.min(rect.height, y1)),
-            railWidth,
-            Math.max(1, Math.min(rect.height, y2) - Math.max(0, y1))
-          );
-        });
-      };
-      const roleGap = 2;
-      const primaryBandWidth = Math.max(3, (periodArea - roleGap) * .48);
-      const referenceBandLeft = periodLeft + primaryBandWidth + roleGap;
-      drawVerticalPeriodBand(primaryPeriods, periodLeft, primaryBandWidth);
-      drawVerticalPeriodBand(referencePeriods, referenceBandLeft, Math.max(3, rect.width - referenceBandLeft - 2));
+      periods.forEach((event, index) => {
+        const y1 = ((event.start - dataMin) / span) * rect.height;
+        const y2 = ((event.end - dataMin) / span) * rect.height;
+        const lanes = Math.max(1, Math.min(3, periods.length));
+        const laneWidth = Math.max(2, periodArea / lanes);
+        const x = periodLeft + (index % lanes) * laneWidth;
+        overviewCtx.fillStyle = event.color;
+        overviewCtx.fillRect(
+          x,
+          Math.max(0, Math.min(rect.height, y1)),
+          Math.max(2, laneWidth - 1),
+          Math.max(1, Math.min(rect.height, y2) - Math.max(0, y1))
+        );
+      });
 
       const top = ((state.viewStart - dataMin) / span) * rect.height;
       const bottom = ((state.viewEnd - dataMin) / span) * rect.height;
@@ -3776,13 +3723,10 @@
       overviewWindow.style.height = `${Math.max(10, clampedBottom - clampedTop)}px`;
     } else {
       const h = Math.max(1, rect.height);
-      const centerGap = Math.max(2, h * .06);
-      const primaryTop = 2;
-      const primaryArea = Math.max(5, h * .36);
-      const pointTop = primaryTop + primaryArea + centerGap;
-      const pointArea = Math.max(6, h * .20);
-      const referenceTop = pointTop + pointArea + centerGap;
-      const referenceArea = Math.max(5, h - referenceTop - 2);
+      const pointTop = Math.max(2, h * .08);
+      const pointArea = Math.max(8, h * .46);
+      const periodTop = Math.max(pointTop + pointArea + 2, h * .60);
+      const periodArea = Math.max(6, h - periodTop - 2);
 
       points.forEach((event, index) => {
         const x = ((event.start - dataMin) / span) * rect.width;
@@ -3790,46 +3734,23 @@
         const lane = index % lanes;
         const y = pointTop + lane * (pointArea / lanes);
         overviewCtx.fillStyle = event.color;
-        overviewCtx.fillRect(Math.max(0, Math.min(rect.width - 1, x)), y, 2, Math.max(2, pointArea / lanes - 1));
+        overviewCtx.fillRect(Math.max(0, Math.min(rect.width - 1, x)), y, 2, Math.max(5, pointArea / lanes - 1));
       });
 
-      // Desktop and iPad radar: primary periods are always drawn above the
-      // center point band and references below it. Category lanes are derived
-      // from the live aboveGroups state on every render rather than from the
-      // original event order.
-      const drawHorizontalPeriodBand = (events, bandTop, bandHeight) => {
-        if (!events.length || bandHeight <= 0) return;
-        const categories = [...new Set(events.map(event => normalizeGroupKey(event.category)))];
-        // Every period is represented by the same fixed-height miniature bar.
-        // A role with only one category must not expand to fill its entire band.
-        const barHeight = Math.max(3, Math.min(6, h * .075));
-        const barGap = 2;
-        const totalHeight = categories.length * barHeight + Math.max(0, categories.length - 1) * barGap;
-        const firstY = bandTop + Math.max(0, (bandHeight - totalHeight) / 2);
-        events.forEach(event => {
-          const x1 = ((event.start - dataMin) / span) * rect.width;
-          const x2 = ((event.end - dataMin) / span) * rect.width;
-          const lane = Math.max(0, categories.indexOf(normalizeGroupKey(event.category)));
-          const y = firstY + lane * (barHeight + barGap);
-          overviewCtx.fillStyle = event.color;
-          overviewCtx.fillRect(
-            Math.max(0, Math.min(rect.width, x1)),
-            y,
-            Math.max(1, Math.min(rect.width, x2) - Math.max(0, x1)),
-            barHeight
-          );
-        });
-      };
-      drawHorizontalPeriodBand(
-        periods.filter(event => isPrimaryCategory(event.category)),
-        primaryTop,
-        primaryArea
-      );
-      drawHorizontalPeriodBand(
-        periods.filter(event => !isPrimaryCategory(event.category)),
-        referenceTop,
-        referenceArea
-      );
+      periods.forEach((event, index) => {
+        const x1 = ((event.start - dataMin) / span) * rect.width;
+        const x2 = ((event.end - dataMin) / span) * rect.width;
+        const lanes = Math.max(1, Math.min(3, periods.length));
+        const laneHeight = Math.max(2, periodArea / lanes);
+        const y = periodTop + (index % lanes) * laneHeight;
+        overviewCtx.fillStyle = event.color;
+        overviewCtx.fillRect(
+          Math.max(0, Math.min(rect.width, x1)),
+          y,
+          Math.max(1, Math.min(rect.width, x2) - Math.max(0, x1)),
+          Math.max(2, laneHeight - 1)
+        );
+      });
 
       const left = ((state.viewStart - dataMin) / span) * rect.width;
       const right = ((state.viewEnd - dataMin) / span) * rect.width;
