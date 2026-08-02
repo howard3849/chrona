@@ -79,6 +79,7 @@ rm -f "$zip_path"
 zip -qr "$zip_path" . \
   -x '.git/*' \
   -x 'release/*' \
+  -x 'dev/*' \
   -x '*.zip' \
   -x '.DS_Store' \
   -x '__MACOSX/*' \

@@ -4,14 +4,16 @@
   const APP_VERSION = window.CHRONA_VERSION || 'dev';
 
   const DEFAULT_SHEET_STORAGE_KEY = 'chrona-default-sheet-url';
-  const ONBOARDING_DISMISSED_STORAGE_KEY = 'chrona-onboarding-dismissed-v1';
+  const ONBOARDING_DISMISSED_STORAGE_KEY = 'chrona-onboarding-dismissed-v2';
   const DEFAULT_EVENT_GID = 681184261;
+  const DEFAULT_CONFIG_GID = 1696716043;
+  // Legacy tab GIDs remain import-only so existing workbooks can be migrated.
   const DEFAULT_CATEGORY_GID = 1068523108;
   const DEFAULT_TRANSLATION_GID = 1376603082;
-  const DEFAULT_SETTINGS_GID = 1696716043;
   const DEFAULT_DICTIONARY_GID = 331215478;
   const LANGUAGE_STORAGE_KEY = 'chrona-language';
   const TRANSLATION_CACHE_KEY = 'chrona-translation-cache-v1';
+  const TRANSLATION_SESSION_KEY = 'chrona-translation-session-v1';
   const DEFAULT_AXIS_Y_RATIO = 0.47;
   // Desktop timelines can require substantial vertical travel when several
   // point and period lanes sit on the same side of the axis. Keep the axis
@@ -83,6 +85,8 @@
   const onboardingNotice = document.getElementById('onboardingNotice');
   const onboardingUseSample = document.getElementById('onboardingUseSample');
   const onboardingAddSheet = document.getElementById('onboardingAddSheet');
+  const exportWorkbookButton = document.getElementById('exportWorkbook');
+  const workbookTransferStatus = document.getElementById('workbookTransferStatus');
 
   const state = {
     events: [],
@@ -90,10 +94,14 @@
     enabledCategories: new Set(),
     aboveGroups: new Set(),
     language: localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'en-US',
-    defaultLanguage: 'en-US',
-    availableLanguages: ['en-US', 'zh-TW'],
+    baselineLanguage: 'en',
+    availableLanguages: ['en'],
     translations: new Map(),
-    dictionary: [],
+    neverTranslate: [],
+    config: new Map(),
+    groupColors: new Map(),
+    configuredPrimaryGroups: [],
+    workbookRows: { timeline: [], config: [] },
     browserTranslationCache: new Map(),
     browserTranslator: null,
     minTime: 1700,
@@ -152,6 +160,7 @@
     'en-US': {
       'app.subtitle': 'Interactive Timeline Explorer',
       'language.label': 'Language',
+      'language.baseline': 'Baseline',
       'actions.reload': 'Reload',
       'actions.save': 'Save',
       'actions.useBannerUrl': 'Use banner URL',
@@ -166,7 +175,7 @@
       'settings.general': 'General',
       'settings.advanced': 'Advanced',
       'settings.version': 'Version',
-      'settings.versionHelp': 'The version increases with every replacement ZIP.',
+      'settings.versionHelp': 'The version is finalized automatically with each Chrona release.',
       'settings.sheetHelp': 'This default is stored locally on this device. The Sheet URL in the top banner remains temporary unless you save it here.',
       'settings.subtitle': 'Appearance changes apply immediately.',
       'settings.defaultSheet': 'Default Google Sheet',
@@ -174,7 +183,7 @@
       'settings.timelineStyle': 'Timeline style',
       'settings.colorMode': 'Color mode',
       'settings.languageHeading': 'Language',
-      'settings.languageHelp': 'English is the source language. Traditional Chinese uses saved Sheet translations first, then the Dictionary tab protects names, brands, and approved terms before browser translation.',
+      'settings.languageHelp': 'The Config sheet defines the baseline and available languages. Human-translated Timeline Data columns are used first; missing text is translated on the fly while Never Translate phrases stay unchanged.',
       'toolbar.aboveSets': 'Primary',
       'toolbar.visible': 'Visible',
       'groups.none': 'None',
@@ -198,11 +207,12 @@
       'details.period': 'Period',
       'status.loading': 'Loading timeline data…',
       'status.records': '{count} timeline records loaded — {source}.',
-      'status.translationFallback': 'Some Traditional Chinese text is unavailable; original English is shown.'
+      'status.translationFallback': 'Some translated text is unavailable; baseline-language text is shown.'
     },
     'zh-TW': {
       'app.subtitle': '互動式時間軸瀏覽器',
       'language.label': '語言',
+      'language.baseline': '基準',
       'actions.reload': '重新載入',
       'actions.save': '儲存',
       'actions.useBannerUrl': '使用上方網址',
@@ -225,7 +235,7 @@
       'settings.timelineStyle': '時間軸樣式',
       'settings.colorMode': '色彩模式',
       'settings.languageHeading': '語言',
-      'settings.languageHelp': '英文是原始語言。繁體中文會優先使用試算表中已儲存的翻譯；若需瀏覽器翻譯，Dictionary 分頁會先保護姓名、品牌及核准用語。',
+      'settings.languageHelp': 'Config 工作表會指定基準語言與可用語言。Chrona 會優先使用 Timeline Data 內的人工作翻譯欄位，缺少的內容才即時翻譯，並保留 Never Translate 詞彙。',
       'toolbar.aboveSets': '主要',
       'toolbar.visible': '顯示',
       'groups.none': '無',
@@ -249,7 +259,7 @@
       'details.period': '時期',
       'status.loading': '正在載入時間軸資料…',
       'status.records': '已載入 {count} 筆時間軸資料 — {source}。',
-      'status.translationFallback': '部分繁體中文尚無翻譯，已顯示原始英文。'
+      'status.translationFallback': '部分翻譯尚未提供，已顯示基準語言內容。'
     }
   };
 
@@ -264,21 +274,62 @@
 
   function loadBrowserTranslationCache() {
     try {
-      const saved = JSON.parse(localStorage.getItem(TRANSLATION_CACHE_KEY) || '{}');
+      const sessionValue = sessionStorage.getItem(TRANSLATION_SESSION_KEY);
+      const legacyValue = localStorage.getItem(TRANSLATION_CACHE_KEY);
+      const saved = JSON.parse(sessionValue || legacyValue || '{}');
       state.browserTranslationCache = new Map(Object.entries(saved));
+      if (!sessionValue && legacyValue) {
+        sessionStorage.setItem(TRANSLATION_SESSION_KEY, JSON.stringify(saved));
+        localStorage.removeItem(TRANSLATION_CACHE_KEY);
+      }
     } catch (_) {
       state.browserTranslationCache = new Map();
     }
   }
 
   function saveBrowserTranslationCache() {
-    const entries = [...state.browserTranslationCache.entries()].slice(-500);
-    localStorage.setItem(TRANSLATION_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
+    const entries = [...state.browserTranslationCache.entries()].slice(-2000);
+    sessionStorage.setItem(TRANSLATION_SESSION_KEY, JSON.stringify(Object.fromEntries(entries)));
+  }
+
+  function languageName(code) {
+    const fallbacks = { 'en-US': 'English', 'zh-TW': '繁體中文', 'zh-CN': '简体中文', 'ja-JP': '日本語', 'ko-KR': '한국어' };
+    try {
+      return new Intl.DisplayNames([state.language, 'en-US'], { type: 'language' }).of(code) || fallbacks[code] || code;
+    } catch (_) {
+      return fallbacks[code] || code;
+    }
+  }
+
+  function rebuildLanguageOptions() {
+    if (!languageSelect) return;
+    languageSelect.replaceChildren();
+    state.availableLanguages.forEach(code => {
+      const option = document.createElement('option');
+      option.value = code;
+      option.textContent = `${languageName(code)}${code === state.baselineLanguage ? ` · ${t('language.baseline')}` : ''}`;
+      languageSelect.appendChild(option);
+    });
+    languageSelect.value = state.language;
+  }
+
+  function translatorLanguageCandidates(code, isSource = false) {
+    const normalized = String(code || '').trim();
+    const map = {
+      'en-US': ['en-US', 'en'],
+      'en-GB': ['en-GB', 'en'],
+      'zh-TW': ['zh-Hant', 'zh-TW', 'zh'],
+      'zh-CN': ['zh-Hans', 'zh-CN', 'zh'],
+      'ja-JP': ['ja-JP', 'ja'],
+      'ko-KR': ['ko-KR', 'ko']
+    };
+    const candidates = map[normalized] || [normalized, normalized.split('-')[0]];
+    return [...new Set(candidates.filter(Boolean))];
   }
 
   function applyInterfaceLanguage() {
     document.documentElement.lang = state.language;
-    if (languageSelect) languageSelect.value = state.language;
+    rebuildLanguageOptions();
     const appVersion = document.getElementById('appVersion');
     if (appVersion) appVersion.textContent = `v${APP_VERSION}`;
     document.querySelectorAll('[data-i18n]').forEach(node => {
@@ -294,45 +345,137 @@
     return `${language}::${entityId}::${field}`;
   }
 
+  function normalizeLanguageCode(value) {
+    const raw = String(value || '').trim().replaceAll('_', '-');
+    if (!raw) return '';
+    const aliases = { SP: 'es', EN: 'en', FR: 'fr', TC: 'zh-TW', SC: 'zh-CN' };
+    if (aliases[raw.toUpperCase()]) return aliases[raw.toUpperCase()];
+    const parts = raw.split('-').filter(Boolean);
+    return parts.map((part, index) => {
+      if (index === 0) return part.toLowerCase();
+      if (part.length === 4) return part[0].toUpperCase() + part.slice(1).toLowerCase();
+      if (part.length === 2 || /^\d{3}$/.test(part)) return part.toUpperCase();
+      return part.toLowerCase();
+    }).join('-');
+  }
+
   function loadTranslations(rows) {
+    // Legacy Translations-tab support. New workbooks keep translations beside
+    // their Timeline Data row in fields such as Title [zh-TW].
     state.translations.clear();
     rows.forEach(row => {
       const entityId = String(row['Entity ID'] || row['Event ID'] || '').trim();
-      const language = String(row.Language || '').trim();
+      const language = normalizeLanguageCode(row.Language);
       const field = String(row.Field || '').trim();
       const translation = String(row.Translation || '').trim();
       if (!entityId || !language || !field || !translation || translation.startsWith('#')) return;
       state.translations.set(translationMapKey(entityId, language, field), {
         translation: sanitizeTranslationArtifacts(translation),
         sourceText: String(row['Source Text'] || ''),
-        status: String(row.Status || 'machine').toLowerCase()
+        status: String(row.Status || 'human').toLowerCase()
       });
     });
   }
 
-
-  function loadDictionary(rows) {
-    state.dictionary = rows
-      .map(row => ({
-        term: String(row.Term || '').trim(),
-        language: String(row.Language || '').trim(),
-        displayAs: String(row['Display As'] || row.DisplayAs || '').trim(),
-        mode: String(row.Mode || 'protect').trim().toLowerCase()
-      }))
-      .filter(entry => entry.term && entry.displayAs && (!entry.language || entry.language === state.language || entry.language === 'zh-TW'))
-      .sort((a, b) => b.term.length - a.term.length);
+  function translatedColumnInfo(header) {
+    const match = String(header || '').trim().match(/^(Title|Headline|Description|Text|Media Caption)\s*\[([^\]]+)\]$/i);
+    if (!match) return null;
+    const fieldName = match[1].toLowerCase();
+    const field = fieldName === 'title' || fieldName === 'headline'
+      ? 'headline'
+      : fieldName === 'description' || fieldName === 'text'
+        ? 'text'
+        : 'mediaCaption';
+    return { field, language: normalizeLanguageCode(match[2]) };
   }
 
-  function protectDictionaryTerms(sourceText) {
+  function inferLanguagesFromTimelineRows(rows) {
+    const inferred = [];
+    rows.forEach(row => Object.keys(row).forEach(header => {
+      const info = translatedColumnInfo(header);
+      if (info?.language) inferred.push(info.language);
+    }));
+    return [...new Set(inferred)];
+  }
+
+  function loadInlineTranslations(rows) {
+    rows.forEach((row, index) => {
+      const group = String(row.Group || row.Category || 'Uncategorized').trim();
+      const title = String(row.Title || row.Title || row.Headline || '(Untitled)');
+      const entityId = String(row['Event ID'] || generateEventId(group, row.Year, title, index)).trim();
+      Object.entries(row).forEach(([header, value]) => {
+        const info = translatedColumnInfo(header);
+        const translation = String(value || '').trim();
+        if (!info?.language || !translation) return;
+        const sourceText = info.field === 'headline'
+          ? String(row.Title || row.Headline || '')
+          : info.field === 'text'
+            ? String(row.Description || row.Description || row.Text || '')
+            : String(row['Media Caption'] || '');
+        state.translations.set(translationMapKey(entityId, info.language, info.field), {
+          translation: sanitizeTranslationArtifacts(translation),
+          sourceText,
+          status: 'human'
+        });
+      });
+    });
+  }
+
+  function configRowsToMap(rows) {
+    const map = new Map();
+    rows.forEach(row => {
+      const key = String(row.Key || row.Setting || '').trim();
+      if (!key) return;
+      map.set(key, String(row.Value || '').trim());
+    });
+    return map;
+  }
+
+  function loadConfig(rows, timelineRows = []) {
+    state.workbookRows.config = rows.map(row => ({ ...row }));
+    state.config = configRowsToMap(rows);
+    state.baselineLanguage = normalizeLanguageCode(
+      state.config.get('language_baseline') ||
+      state.config.get('baseline_language') ||
+      state.config.get('default_language') ||
+      'en'
+    ) || 'en';
+
+    const configuredLanguages = String(
+      state.config.get('language_available') ||
+      state.config.get('available_languages') ||
+      ''
+    ).split(',').map(normalizeLanguageCode).filter(Boolean);
+    const inferredLanguages = configuredLanguages.length ? [] : inferLanguagesFromTimelineRows(timelineRows);
+    state.availableLanguages = [...new Set([state.baselineLanguage, ...configuredLanguages, ...inferredLanguages])];
+    if (!state.availableLanguages.includes(state.language)) state.language = state.baselineLanguage;
+
+    state.neverTranslate = [...state.config.entries()]
+      .filter(([key, value]) => /^never_translate(?:\.|$)/i.test(key) && value)
+      .map(([, value]) => value)
+      .sort((a, b) => b.length - a.length);
+
+    state.groupColors = new Map();
+    [...state.config.entries()].forEach(([key, value]) => {
+      const match = key.match(/^group_color\.(.+)$/i);
+      if (match && value) state.groupColors.set(match[1].trim(), normalizeHex(value));
+    });
+    state.configuredPrimaryGroups = String(state.config.get('primary_groups') || '')
+      .split(',').map(value => value.trim()).filter(Boolean);
+    rebuildLanguageOptions();
+  }
+
+  function protectNeverTranslateTerms(sourceText) {
     let protectedText = String(sourceText || '');
     const replacements = [];
-    const entries = state.dictionary.filter(entry => entry.language === state.language || entry.language === 'zh-TW');
-    entries.forEach(entry => {
-      const escaped = entry.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const pattern = new RegExp(`\\b${escaped}\\b`, 'gi');
+    state.neverTranslate.forEach(term => {
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const startsWord = /^[\p{L}\p{N}]/u.test(term);
+      const endsWord = /[\p{L}\p{N}]$/u.test(term);
+      const pattern = new RegExp(`${startsWord ? '(?<![\\p{L}\\p{N}])' : ''}${escaped}${endsWord ? '(?![\\p{L}\\p{N}])' : ''}`, 'giu');
       protectedText = protectedText.replace(pattern, match => {
         const token = `CHRONATERM${replacements.length}TOKEN`;
-        replacements.push({ token, displayAs: entry.displayAs, original: match });
+        replacements.push({ token, displayAs: match, original: match });
         return token;
       });
     });
@@ -341,43 +484,21 @@
 
   function sanitizeTranslationArtifacts(value, replacements = []) {
     let cleaned = String(value || '');
-
     replacements.forEach(({ token, displayAs }, index) => {
       const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       cleaned = cleaned.replace(new RegExp(escapedToken, 'gi'), displayAs);
-
-      // Chrome's Translator may change token casing or add punctuation/spaces.
-      cleaned = cleaned.replace(
-        new RegExp(`chronaterm\\s*\\(?\\s*${index}\\s*\\)?\\s*token`, 'gi'),
-        displayAs
-      );
+      cleaned = cleaned.replace(new RegExp(`chronaterm\\s*\\(?\\s*${index}\\s*\\)?\\s*token`, 'gi'), displayAs);
     });
-
-    // Never expose an unresolved internal token to the user.
-    cleaned = cleaned.replace(
-      /chronaterm\s*\(?\s*\d+\s*\)?\s*token/gi,
-      ''
-    );
-
-    return cleaned
-      .replace(/\s{2,}/g, ' ')
-      .replace(/\s+([，。！？；：,.!?;:])/g, '$1')
-      .trim();
+    cleaned = cleaned.replace(/chronaterm\s*\(?\s*\d+\s*\)?\s*token/gi, '');
+    return cleaned.replace(/\s{2,}/g, ' ').replace(/\s+([，。！？；：,.!?;:])/g, '$1').trim();
   }
 
-  function restoreDictionaryTerms(translatedText, replacements) {
+  function restoreNeverTranslateTerms(translatedText, replacements) {
     return sanitizeTranslationArtifacts(translatedText, replacements);
   }
 
-  function loadDatasetSettings(rows) {
-    const settings = Object.fromEntries(rows.map(row => [String(row.Setting || '').trim(), String(row.Value || '').trim()]));
-    state.defaultLanguage = settings.default_language || 'en-US';
-    state.availableLanguages = (settings.available_languages || 'en-US,zh-TW').split(',').map(value => value.trim()).filter(Boolean);
-    if (!state.availableLanguages.includes(state.language)) state.language = state.defaultLanguage;
-  }
-
   function savedTranslation(entityId, field, sourceText) {
-    if (state.language === state.defaultLanguage) return '';
+    if (state.language === state.baselineLanguage) return '';
     const record = state.translations.get(translationMapKey(entityId, state.language, field));
     if (!record) return '';
     if (record.sourceText && sourceText && record.sourceText !== sourceText && record.status !== 'approved') return '';
@@ -389,7 +510,7 @@
   }
 
   function localizedDisplayDate(event) {
-    if (state.language !== 'zh-TW') return event.sourceDisplayDate || '';
+    if (state.language === state.baselineLanguage) return event.sourceDisplayDate || '';
     const year = event.sourceYear;
     const month = event.sourceMonth;
     const day = event.sourceDay;
@@ -397,31 +518,54 @@
     const endMonth = event.sourceEndMonth;
     const endDay = event.sourceEndDay;
     if (!year) return event.sourceDisplayDate || '';
-    const start = `${year}年${month ? `${Number(month)}月` : ''}${day ? `${Number(day)}日` : ''}`;
-    if (!endYear) return start;
-    const end = `${endYear}年${endMonth ? `${Number(endMonth)}月` : ''}${endDay ? `${Number(endDay)}日` : ''}`;
-    return `${start}－${end}`;
+
+    if (state.language === 'zh-TW' || state.language === 'zh-CN') {
+      const start = `${year}年${month ? `${Number(month)}月` : ''}${day ? `${Number(day)}日` : ''}`;
+      if (!endYear) return start;
+      const end = `${endYear}年${endMonth ? `${Number(endMonth)}月` : ''}${endDay ? `${Number(endDay)}日` : ''}`;
+      return `${start}－${end}`;
+    }
+
+    if (state.language.startsWith('en')) {
+      const formatPart = (y, m, d) => {
+        if (!m) return String(y);
+        const monthName = new Intl.DateTimeFormat(state.language, { month: 'long', timeZone: 'UTC' })
+          .format(new Date(Date.UTC(2000, Number(m) - 1, 1)));
+        return d ? `${monthName} ${Number(d)}, ${y}` : `${monthName} ${y}`;
+      };
+      const first = formatPart(year, month, day);
+      return endYear ? `${first}–${formatPart(endYear, endMonth, endDay)}` : first;
+    }
+
+    return event.sourceDisplayDate || '';
   }
 
   async function createBrowserTranslator() {
-    if (state.browserTranslator || state.language !== 'zh-TW') return state.browserTranslator;
+    if (state.language === state.baselineLanguage) return null;
     const API = globalThis.Translator;
     if (!API?.create) return null;
-    for (const targetLanguage of ['zh-Hant', 'zh-TW']) {
-      try {
-        const availability = await API.availability?.({ sourceLanguage: 'en', targetLanguage });
-        if (availability === 'unavailable') continue;
-        state.browserTranslator = await API.create({ sourceLanguage: 'en', targetLanguage });
-        return state.browserTranslator;
-      } catch (_) {}
+    const cacheKey = `${state.baselineLanguage}>${state.language}`;
+    if (state.browserTranslator?.cacheKey === cacheKey) return state.browserTranslator.instance;
+
+    for (const sourceLanguage of translatorLanguageCandidates(state.baselineLanguage, true)) {
+      for (const targetLanguage of translatorLanguageCandidates(state.language)) {
+        if (sourceLanguage === targetLanguage) continue;
+        try {
+          const availability = await API.availability?.({ sourceLanguage, targetLanguage });
+          if (availability === 'unavailable') continue;
+          const instance = await API.create({ sourceLanguage, targetLanguage });
+          state.browserTranslator = { cacheKey, instance };
+          return instance;
+        } catch (_) {}
+      }
     }
     return null;
   }
 
   async function browserTranslate(sourceText) {
     const text = String(sourceText || '').trim();
-    if (!text || state.language !== 'zh-TW') return '';
-    const cacheKey = `en>zh-TW::dictionary-v1::${text}`;
+    if (!text || state.language === state.baselineLanguage) return '';
+    const cacheKey = `${state.baselineLanguage}>${state.language}::never-translate-v1::${text}`;
     if (state.browserTranslationCache.has(cacheKey)) {
       const cached = sanitizeTranslationArtifacts(state.browserTranslationCache.get(cacheKey));
       if (cached) state.browserTranslationCache.set(cacheKey, cached);
@@ -429,10 +573,10 @@
     }
     const translator = await createBrowserTranslator();
     if (!translator?.translate) return '';
-    const { protectedText, replacements } = protectDictionaryTerms(text);
+    const { protectedText, replacements } = protectNeverTranslateTerms(text);
     try {
       const translated = await translator.translate(protectedText);
-      const restored = restoreDictionaryTerms(translated, replacements);
+      const restored = restoreNeverTranslateTerms(translated, replacements);
       if (restored) {
         state.browserTranslationCache.set(cacheKey, restored);
         saveBrowserTranslationCache();
@@ -454,7 +598,7 @@
   }
 
   async function translateMissingEvents() {
-    if (state.language !== 'zh-TW') return;
+    if (state.language === state.baselineLanguage) return;
     const translator = await createBrowserTranslator();
     if (!translator) return;
     let changed = false;
@@ -476,7 +620,7 @@
 
   function setLanguage(language, translateMissing = true) {
     state.detailShowOriginal = false;
-    state.language = state.availableLanguages.includes(language) ? language : state.defaultLanguage;
+    state.language = state.availableLanguages.includes(language) ? language : state.baselineLanguage;
     localStorage.setItem(LANGUAGE_STORAGE_KEY, state.language);
     applyInterfaceLanguage();
     applyLanguageToEvents();
@@ -503,8 +647,16 @@
   const loadedTimelineThumbnails = new Set();
   const failedTimelineThumbnails = new Set();
 
-  const savedDefaultSheetUrl = localStorage.getItem(DEFAULT_SHEET_STORAGE_KEY) || '';
-  if (sheetUrlInput) sheetUrlInput.value = savedDefaultSheetUrl;
+  function syncSavedSheetUrlField() {
+    if (!defaultSheetUrlInput) return;
+    defaultSheetUrlInput.value = localStorage.getItem(DEFAULT_SHEET_STORAGE_KEY) || '';
+  }
+
+  syncSavedSheetUrlField();
+  window.addEventListener('pageshow', syncSavedSheetUrlField);
+  window.addEventListener('storage', event => {
+    if (event.key === DEFAULT_SHEET_STORAGE_KEY) syncSavedSheetUrlField();
+  });
 
   const savedTheme = localStorage.getItem('timeline-theme') || 'auto';
   const savedVisualTheme = localStorage.getItem('chrona-visual-theme') || 'gradient';
@@ -531,10 +683,11 @@
     try {
       parseSheetSource(value);
       localStorage.setItem(DEFAULT_SHEET_STORAGE_KEY, value);
+      syncSavedSheetUrlField();
       updateOnboardingNotice();
-      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '已儲存，正在載入…' : 'Saved. Loading…';
+      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '正在重新載入…' : 'Reloading…';
       await loadTimeline();
-      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '已儲存並載入。' : 'Saved and loaded.';
+      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '時間軸已重新載入。' : 'Timeline reloaded.';
     } catch (error) {
       defaultSheetStatus.textContent = error.message;
       sheetUrlInput?.focus();
@@ -550,6 +703,21 @@
   reloadButton?.addEventListener('click', () => {
     loadTimeline();
     closeSheetControl();
+  });
+  exportWorkbookButton?.addEventListener('click', async event => {
+    event.preventDefault();
+    exportWorkbookButton.setAttribute('aria-disabled', 'true');
+    workbookTransferStatus.textContent = state.language === 'zh-TW' ? '正在建立工作簿…' : 'Building workbook…';
+    try {
+      const translationCount = await exportTranslatedWorkbook();
+      workbookTransferStatus.textContent = state.language === 'zh-TW'
+        ? `已匯出工作簿，包含 ${translationCount} 個翻譯欄位。`
+        : `Workbook exported with ${translationCount} translated cells.`;
+    } catch (error) {
+      workbookTransferStatus.textContent = error.message;
+    } finally {
+      exportWorkbookButton.removeAttribute('aria-disabled');
+    }
   });
   document.getElementById('zoomIn').addEventListener('click', () => zoomAt(0.5, 0.7));
   document.getElementById('zoomOut').addEventListener('click', () => zoomAt(0.5, 1.4));
@@ -831,9 +999,9 @@
 
   function toggleSettings(forceOpen) {
     const opening = typeof forceOpen === 'boolean' ? forceOpen : settingsPanel.hidden;
-    if (opening && defaultSheetUrlInput) {
-      defaultSheetUrlInput.value = localStorage.getItem(DEFAULT_SHEET_STORAGE_KEY) || '';
-      defaultSheetStatus.textContent = '';
+    if (opening) {
+      syncSavedSheetUrlField();
+      if (defaultSheetStatus) defaultSheetStatus.textContent = '';
     }
     settingsPanel.hidden = !opening;
     settingsBackdrop.hidden = !opening;
@@ -987,6 +1155,108 @@
     return rows.slice(1).map(row => Object.fromEntries(headers.map((h, i) => [h, row[i] ?? ''])));
   }
 
+
+  function workbookDateStamp() {
+    const now = new Date();
+    const pad = value => String(value).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  }
+
+  function translationCacheValue(language, sourceText) {
+    const text = String(sourceText || '').trim();
+    if (!text || language === state.baselineLanguage) return '';
+    return sanitizeTranslationArtifacts(state.browserTranslationCache.get(`${state.baselineLanguage}>${language}::never-translate-v1::${text}`) || '');
+  }
+
+  function translatedHeader(field, language) {
+    const labels = { headline: 'Title', text: 'Description', mediaCaption: 'Media Caption' };
+    return `${labels[field]} [${language}]`;
+  }
+
+  function exportedTimelineRows() {
+    return state.workbookRows.timeline.map((sourceRow, index) => {
+      const row = { ...sourceRow };
+      // Normalize the new schema while retaining all non-legacy custom columns.
+      row.Title = row.Title || row.Headline || '';
+      row.Description = row.Description || row.Text || '';
+      delete row.Headline;
+      delete row.Text;
+      delete row.Position;
+      const group = String(row.Group || row.Category || 'Uncategorized').trim();
+      const entityId = String(row['Event ID'] || generateEventId(group, row.Year, row.Title, index)).trim();
+      row['Event ID'] = entityId;
+
+      state.availableLanguages.filter(language => language !== state.baselineLanguage).forEach(language => {
+        const fields = [
+          ['headline', row.Title || ''],
+          ['text', row.Description || ''],
+          ['mediaCaption', row['Media Caption'] || '']
+        ];
+        fields.forEach(([field, sourceText]) => {
+          const saved = state.translations.get(translationMapKey(entityId, language, field))?.translation || '';
+          const generated = translationCacheValue(language, sourceText);
+          const value = sanitizeTranslationArtifacts(saved || generated || '');
+          const header = translatedHeader(field, language);
+          if (value) row[header] = value;
+        });
+      });
+      return row;
+    });
+  }
+
+  function exportedConfigRows() {
+    const retained = state.workbookRows.config
+      .filter(row => {
+        const key = String(row.Key || row.Setting || '').trim();
+        return key && ![
+          'language_baseline', 'baseline_language', 'default_language',
+          'language_available', 'available_languages', 'primary_groups'
+        ].includes(key) && !/^group_color\./i.test(key) && !/^never_translate(?:\.|$)/i.test(key);
+      })
+      .map(row => ({ Key: String(row.Key || row.Setting || '').trim(), Value: String(row.Value || '') }));
+
+    const rows = [
+      { Key: 'language_baseline', Value: state.baselineLanguage },
+      { Key: 'language_available', Value: state.availableLanguages.join(',') },
+      { Key: 'primary_groups', Value: [...state.aboveGroups].join(',') }
+    ];
+    categoryNames().forEach(name => rows.push({ Key: `group_color.${name}`, Value: state.categories.get(name)?.color || stableGroupColor(name) }));
+    state.neverTranslate.forEach((term, index) => rows.push({ Key: `never_translate.${index + 1}`, Value: term }));
+    return [...rows, ...retained];
+  }
+
+  function jsonSheet(rows, fallbackHeaders) {
+    const safeRows = rows.length ? rows : [Object.fromEntries(fallbackHeaders.map(header => [header, '']))];
+    const sheet = XLSX.utils.json_to_sheet(safeRows, { header: fallbackHeaders });
+    if (!rows.length && sheet['!ref']) XLSX.utils.sheet_add_aoa(sheet, [fallbackHeaders], { origin: 'A1' });
+    return sheet;
+  }
+
+  async function exportTranslatedWorkbook() {
+    if (!window.XLSX?.utils || !window.XLSX?.writeFile) {
+      throw new Error('The workbook export library did not load. Check your internet connection and reload Chrona.');
+    }
+    if (!state.workbookRows.timeline.length) throw new Error('No timeline data is loaded.');
+
+    const timelineRows = exportedTimelineRows();
+    const configRows = exportedConfigRows();
+    const workbook = XLSX.utils.book_new();
+    const baseHeaders = [
+      'Year', 'Month', 'Day', 'Time', 'End Year', 'End Month', 'End Day', 'End Time',
+      'Display Date', 'Title', 'Description', 'Media', 'Media Credit', 'Media Caption',
+      'Media Thumbnail', 'Group', 'Type', 'Importance', 'Color', 'Visible', 'Event ID'
+    ];
+    const translatedHeaders = state.availableLanguages
+      .filter(language => language !== state.baselineLanguage)
+      .flatMap(language => ['headline', 'text', 'mediaCaption'].map(field => translatedHeader(field, language)));
+    const extraHeaders = [...new Set(timelineRows.flatMap(row => Object.keys(row)))]
+      .filter(header => !baseHeaders.includes(header) && !translatedHeaders.includes(header));
+    XLSX.utils.book_append_sheet(workbook, jsonSheet(timelineRows, [...baseHeaders, ...translatedHeaders, ...extraHeaders]), 'Timeline Data');
+    XLSX.utils.book_append_sheet(workbook, jsonSheet(configRows, ['Key', 'Value']), 'Config');
+    XLSX.writeFile(workbook, `chrona-export-${workbookDateStamp()}.xlsx`, { compression: true });
+    return timelineRows.reduce((count, row) => count + Object.keys(row).filter(header => translatedColumnInfo(header) && row[header]).length, 0);
+  }
+
   function parseNumber(value) {
     if (value === '' || value == null) return null;
     const n = Number(value);
@@ -1037,35 +1307,48 @@
     return /^#[0-9A-F]{6}$/i.test(value || '') ? value : fallback;
   }
 
+  function stableGroupColor(name) {
+    const palette = ['#2563EB', '#DC2626', '#7C3AED', '#D97706', '#059669', '#DB2777', '#0891B2', '#4F46E5', '#EA580C', '#65A30D'];
+    let hash = 0;
+    for (const ch of String(name || '')) hash = ((hash << 5) - hash + ch.codePointAt(0)) | 0;
+    return palette[Math.abs(hash) % palette.length];
+  }
+
+  // The fallback timeline lives in sample-data.js so it can be reviewed and
+  // edited independently from the application logic.
   const SAMPLE_DATA = window.CHRONA_SAMPLE_DATA || { categories: [], events: [] };
-  const EMBEDDED_CATEGORIES = SAMPLE_DATA.categories;
-  const EMBEDDED_EVENTS = SAMPLE_DATA.events;
+  const SAMPLE_CATEGORIES = SAMPLE_DATA.categories;
+  const SAMPLE_EVENTS = SAMPLE_DATA.events;
 
   function applyRows(rawEvents, rawCategories, sourceLabel) {
+    state.workbookRows.timeline = rawEvents.map(row => ({ ...row }));
     state.categories.clear();
-    rawCategories.forEach(row => {
-      const name = (row.Group || row.Category || '').trim();
-      if (!name) return;
+    const legacyGroups = new Map(rawCategories.map(row => [String(row.Group || row.Category || '').trim(), row]));
+    const groupNamesFromRows = [...new Set(rawEvents.map(row => String(row.Group || row.Category || 'Uncategorized').trim()).filter(Boolean))];
+    groupNamesFromRows.forEach(name => {
+      const legacy = legacyGroups.get(name) || {};
+      const configuredColor = state.groupColors.get(name);
       state.categories.set(name, {
         name,
-        color: normalizeHex(row.Color),
-        visible: String(row['Default Visible']).toUpperCase() !== 'FALSE',
-        position: row['Default Position'] || 'Below'
+        color: configuredColor || normalizeHex(legacy.Color, stableGroupColor(name)),
+        visible: String(legacy['Default Visible']).toUpperCase() !== 'FALSE',
+        position: state.configuredPrimaryGroups.includes(name) ? 'Above' : 'Below'
       });
     });
 
+    loadInlineTranslations(rawEvents);
     state.events = rawEvents.map((row, index) => {
       const start = toTimelineTime(row.Year, row.Month, row.Day, row.Time);
       const end = toTimelineTime(row['End Year'], row['End Month'], row['End Day'], row['End Time']);
       const categoryName = (row.Group || row.Category || 'Uncategorized').trim();
       const category = state.categories.get(categoryName) || { color: '#64748B', position: 'Below', visible: true };
       return {
-        id: row['Event ID'] || generateEventId(categoryName, row.Year, row.Headline, index),
-        sourceHeadline: row.Headline || '(Untitled)',
-        sourceText: row.Text || '',
+        id: row['Event ID'] || generateEventId(categoryName, row.Year, row.Title || row.Headline, index),
+        sourceHeadline: row.Title || row.Headline || '(Untitled)',
+        sourceText: row.Description || row.Text || '',
         sourceDisplayDate: row['Display Date'] || '',
-        headline: row.Headline || '(Untitled)',
-        text: row.Text || '',
+        headline: row.Title || row.Headline || '(Untitled)',
+        text: row.Description || row.Text || '',
         displayDate: row['Display Date'] || '',
         sourceYear: row.Year || '',
         sourceMonth: row.Month || '',
@@ -1077,9 +1360,9 @@
         end,
         category: categoryName,
         elementType: normalizeElementType(row.Type || row['Element Type'] || 'event'),
-        position: row.Position || category.position || 'Below',
+        position: category.position || 'Below',
         importance: row.Importance || 'Medium',
-        color: normalizeHex(row.Color, category.color),
+        color: state.groupColors.has(categoryName) ? category.color : normalizeHex(row.Color, category.color),
         visible: String(row.Visible).toUpperCase() !== 'FALSE' && start != null,
         media: normalizeMediaUrl(row.Media || row['Media URL'] || row.media || row.mediaUrl || ''),
         sourceMediaCaption: row['Media Caption'] || row.MediaCaption || row.mediaCaption || '',
@@ -1097,15 +1380,17 @@
     );
     const groupNames = categoryNames();
     const groupNameByKey = new Map(groupNames.map(name => [normalizeGroupKey(name), name]));
-    const configuredAbove = groupNames.filter(name => String(state.categories.get(name)?.position || '').toLowerCase() === 'above');
-    state.aboveGroups = new Set(
-      [...state.aboveGroups]
-        .map(name => groupNameByKey.get(normalizeGroupKey(name)))
-        .filter(Boolean)
-    );
-    if (!state.aboveGroups.size) {
-      const eventAbove = groupNames.filter(name => state.events.some(event => event.category === name && String(event.position).toLowerCase() === 'above'));
-      state.aboveGroups = new Set(configuredAbove.length ? configuredAbove : eventAbove.slice(0, 1));
+    const configuredAbove = state.configuredPrimaryGroups
+      .map(name => groupNameByKey.get(normalizeGroupKey(name)))
+      .filter(Boolean);
+    if (configuredAbove.length) {
+      state.aboveGroups = new Set(configuredAbove);
+    } else {
+      state.aboveGroups = new Set(
+        [...state.aboveGroups]
+          .map(name => groupNameByKey.get(normalizeGroupKey(name)))
+          .filter(Boolean)
+      );
     }
     buildFilters();
     buildAboveSetsMenu();
@@ -1122,11 +1407,10 @@
     statusEl.textContent = t('status.loading');
     const requestedUrl = sheetUrlInput.value.trim();
     if (!requestedUrl) {
-      loadDatasetSettings([]);
       loadTranslations([]);
-      loadDictionary([]);
-      if (!EMBEDDED_EVENTS.length) throw new Error('Sample data is unavailable.');
-      applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'sample timeline');
+      loadConfig(window.CHRONA_SAMPLE_DATA?.config || window.CHRONA_SAMPLE_DATA?.settings || [], SAMPLE_EVENTS);
+      if (!SAMPLE_EVENTS.length) throw new Error('Sample data is unavailable.');
+      applyRows(SAMPLE_EVENTS, SAMPLE_CATEGORIES, 'sample timeline');
       setLanguage(state.language, false);
       statusEl.textContent = `${state.events.length} timeline records loaded — add a Google Sheet URL in Settings.`;
       return;
@@ -1134,77 +1418,50 @@
 
     try {
       const source = parseSheetSource(requestedUrl);
-
-      const eventPromise = fetchCsvCompatible(source, 'TimelineJS Data', DEFAULT_EVENT_GID);
-      const categoryPromise = (async () => {
-        try {
-          return await fetchCsvCompatible(source, 'Groups', DEFAULT_CATEGORY_GID);
-        } catch (_) {
-          try {
-            return await fetchCsvCompatible(source, 'Categories', DEFAULT_CATEGORY_GID);
-          } catch (error) {
-            console.warn('Groups tab unavailable; deriving groups from events.', error);
-            return null;
-          }
-        }
+      const eventPromise = (async () => {
+        try { return await fetchCsvCompatible(source, 'Timeline Data', DEFAULT_EVENT_GID); }
+        catch (_) { return await fetchCsvCompatible(source, 'TimelineJS Data', DEFAULT_EVENT_GID); }
       })();
-
       const optional = async (sheetName, gid, warning) => {
-        try {
-          return await fetchCsvCompatible(source, sheetName, gid);
-        } catch (error) {
-          console.warn(warning, error);
-          return null;
-        }
+        try { return await fetchCsvCompatible(source, sheetName, gid); }
+        catch (error) { console.warn(warning, error); return null; }
       };
 
-      const [
-        eventResult,
-        categoryResult,
-        translationResult,
-        settingsResult,
-        dictionaryResult
-      ] = await Promise.all([
+      const [eventResult, configResult, legacyGroupsResult, legacyTranslationsResult, legacySettingsResult, legacyDictionaryResult] = await Promise.all([
         eventPromise,
-        categoryPromise,
-        optional('Translations', DEFAULT_TRANSLATION_GID, 'Translations tab unavailable.'),
-        optional('Dataset Settings', DEFAULT_SETTINGS_GID, 'Dataset Settings tab unavailable.'),
-        optional('Dictionary', DEFAULT_DICTIONARY_GID, 'Dictionary tab unavailable.')
+        optional('Config', DEFAULT_CONFIG_GID, 'Config tab unavailable; Chrona will infer defaults.'),
+        optional('Groups', DEFAULT_CATEGORY_GID, 'Legacy Groups tab unavailable.'),
+        optional('Translations', DEFAULT_TRANSLATION_GID, 'Legacy Translations tab unavailable.'),
+        optional('Dataset Settings', DEFAULT_CONFIG_GID, 'Legacy Dataset Settings tab unavailable.'),
+        optional('Dictionary', DEFAULT_DICTIONARY_GID, 'Legacy Dictionary tab unavailable.')
       ]);
 
-      const categoryRows = categoryResult ? rowsToObjects(parseCsv(categoryResult.text)) : [];
-      loadDatasetSettings(settingsResult ? rowsToObjects(parseCsv(settingsResult.text)) : []);
-      loadTranslations(translationResult ? rowsToObjects(parseCsv(translationResult.text)) : []);
-      loadDictionary(dictionaryResult ? rowsToObjects(parseCsv(dictionaryResult.text)) : []);
+      const timelineRows = rowsToObjects(parseCsv(eventResult.text));
+      let configRows = configResult ? rowsToObjects(parseCsv(configResult.text)) : [];
+      if (!configRows.length && legacySettingsResult) {
+        configRows = rowsToObjects(parseCsv(legacySettingsResult.text)).map(row => ({ Key: row.Setting, Value: row.Value }));
+      }
+      if (legacyDictionaryResult) {
+        const legacyTerms = rowsToObjects(parseCsv(legacyDictionaryResult.text));
+        legacyTerms.forEach((row, index) => {
+          const term = String(row.Term || row['Display As'] || '').trim();
+          if (term) configRows.push({ Key: `never_translate.legacy${index + 1}`, Value: term });
+        });
+      }
+      loadConfig(configRows, timelineRows);
+      loadTranslations(legacyTranslationsResult ? rowsToObjects(parseCsv(legacyTranslationsResult.text)) : []);
+      const legacyGroups = legacyGroupsResult ? rowsToObjects(parseCsv(legacyGroupsResult.text)) : [];
 
-      const sourceLabels = [...new Set([
-        eventResult.sourceLabel,
-        categoryResult?.sourceLabel,
-        translationResult?.sourceLabel,
-        dictionaryResult?.sourceLabel
-      ].filter(Boolean))];
-
-      applyRows(
-        rowsToObjects(parseCsv(eventResult.text)),
-        categoryRows,
-        `live Google Sheet via ${sourceLabels.join(' + ')}`
-      );
-
-      // Apply saved translations immediately. Missing machine translations run
-      // afterward and never block the loaded status.
+      applyRows(timelineRows, legacyGroups, `live Google Sheet via ${eventResult.sourceLabel}`);
       setLanguage(state.language, false);
-      statusEl.textContent = t('status.records', {
-        count: state.events.length,
-        source: `live Google Sheet via ${sourceLabels.join(' + ')}`
-      });
+      statusEl.textContent = t('status.records', { count: state.events.length, source: `live Google Sheet via ${eventResult.sourceLabel}` });
       translateMissingEvents();
     } catch (error) {
-      console.warn('Live sheet unavailable; using embedded snapshot.', error);
-      loadDatasetSettings([]);
+      console.warn('Live sheet unavailable; using sample-data.js.', error);
       loadTranslations([]);
-      loadDictionary([]);
-      if (!EMBEDDED_EVENTS.length) throw error;
-      applyRows(EMBEDDED_EVENTS, EMBEDDED_CATEGORIES, 'sample timeline');
+      loadConfig(window.CHRONA_SAMPLE_DATA?.config || window.CHRONA_SAMPLE_DATA?.settings || [], SAMPLE_EVENTS);
+      if (!SAMPLE_EVENTS.length) throw error;
+      applyRows(SAMPLE_EVENTS, SAMPLE_CATEGORIES, 'sample timeline');
       setLanguage(state.language, false);
       statusEl.classList.add('status-warning');
       statusEl.textContent = `Google Sheet could not be loaded; showing the bundled sample timeline instead. ${error.message}`;
@@ -3067,7 +3324,7 @@
   }
 
   function translationRecord(entityId, field) {
-    if (state.language === state.defaultLanguage) return null;
+    if (state.language === state.baselineLanguage) return null;
     return state.translations.get(translationMapKey(entityId, state.language, field)) || null;
   }
 
@@ -3076,7 +3333,7 @@
   }
 
   function fieldUsesMachineTranslation(event, field, sourceField) {
-    if (state.language === state.defaultLanguage) return false;
+    if (state.language === state.baselineLanguage) return false;
     const sourceText = String(event[sourceField] || '').trim();
     const displayedText = String(event[field] || '').trim();
     if (!sourceText || !displayedText || displayedText === sourceText) return false;
@@ -3085,7 +3342,7 @@
   }
 
   function groupUsesMachineTranslation(event) {
-    if (state.language === state.defaultLanguage) return false;
+    if (state.language === state.baselineLanguage) return false;
     const sourceText = String(event.category || '').trim();
     const displayedText = String(event.categoryLabel || '').trim();
     if (!sourceText || !displayedText || sourceText === displayedText) return false;

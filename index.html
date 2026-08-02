@@ -4,11 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Chrona — Interactive Timeline Explorer</title>
-  <link rel="stylesheet" href="styles.css?v=2.1.18">
-  <link rel="stylesheet" href="css/theme-colors.css?v=2.1.18">
-  <link rel="stylesheet" href="css/search.css?v=2.1.18">
-  <link rel="stylesheet" href="css/year-ruler.css?v=2.1.18">
-  <link rel="stylesheet" href="css/phone-period.css?v=2.1.18">
+  <link rel="stylesheet" href="styles.css?v=2.5.2">
+  <link rel="stylesheet" href="css/theme-colors.css?v=2.5.2">
+  <link rel="stylesheet" href="css/search.css?v=2.5.2">
+  <link rel="stylesheet" href="css/year-ruler.css?v=2.5.2">
+  <link rel="stylesheet" href="css/phone-period.css?v=2.5.2">
 </head>
 <body>
   <header class="app-header">
@@ -54,12 +54,14 @@
   </header>
 
   <section id="onboardingNotice" class="onboarding-notice" hidden aria-label="Getting started with Chrona">
-    <div>
-      <strong>Welcome to Chrona.</strong> You are viewing a bundled sample timeline. Your own Google Sheet is saved only in this browser and is never shared with other visitors.
+    <div class="onboarding-copy">
+      <strong>Welcome to Chrona — sample timeline loaded.</strong>
+      <span>To use your own timeline, download the sample spreadsheet, upload it to Google Drive, edit it, share it with “Anyone with the link,” then paste its shared URL into Settings.</span>
     </div>
     <div class="onboarding-actions">
-      <button id="onboardingUseSample" type="button">Explore sample</button>
-      <button id="onboardingAddSheet" class="onboarding-primary" type="button">Add my Google Sheet</button>
+      <a class="onboarding-download" href="chrona-sample-timeline.xlsx" download>Download sample spreadsheet</a>
+      <button id="onboardingAddSheet" class="onboarding-primary" type="button">Open Settings</button>
+      <button id="onboardingUseSample" type="button">Continue with sample</button>
     </div>
   </section>
 
@@ -74,8 +76,10 @@
       <h3 id="sheetSourceHeading" data-i18n="settings.googleSheet">Google Sheet URL</h3>
       <div class="default-sheet-settings">
         <input id="defaultSheetUrl" type="url" spellcheck="false" placeholder="Paste a Google Sheet URL" data-i18n-placeholder="sheet.placeholder" aria-label="Google Sheet URL" />
-        <button id="saveDefaultSheetUrl" type="button" data-i18n="actions.save">Save</button>
+        <button id="saveDefaultSheetUrl" type="button" data-i18n="actions.reload">Reload</button>
+        <p class="settings-sheet-help"><a id="exportWorkbook" href="#">Export</a> to download the current timeline, translations, and configs as a Google Sheet-compatible workbook. New to Chrona? Download the sample spreadsheet <a href="chrona-sample-timeline.xlsx" download>here</a>.</p>
         <div id="defaultSheetStatus" class="default-sheet-status" role="status" aria-live="polite"></div>
+        <div id="workbookTransferStatus" class="default-sheet-status" role="status" aria-live="polite"></div>
       </div>
     </section>
 
@@ -118,16 +122,19 @@
       <div class="settings-language-row">
         <h3 id="languageHeading" data-i18n="settings.languageHeading">Language</h3>
         <select id="languageSelect" aria-label="Display language">
-          <option value="en-US">English (EN)</option>
-          <option value="zh-TW">繁體中文 (TC)</option>
+          <option value="en">English · Baseline</option>
         </select>
       </div>
+      <p class="settings-help settings-language-help">
+        Languages come from <code>language_available</code> in the Config sheet.
+        <a href="https://www.w3.org/International/articles/language-tags/" target="_blank" rel="noopener noreferrer">Language-code guide</a>
+      </p>
     </section>
 
     <section class="settings-section settings-version-section">
       <div class="settings-version-row">
         <span data-i18n="settings.version">Version</span>
-        <code id="appVersion">v2.1.18</code>
+        <code id="appVersion">v2.5.2</code>
       </div>
     </section>
   </aside>
@@ -192,8 +199,9 @@
     </label>
   </template>
 
-  <script defer src="version.js?v=2.1.18"></script>
-  <script defer src="sample-data.js?v=2.1.18"></script>
-  <script defer src="timeline.js?v=2.1.18"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script defer src="version.js?v=2.5.2"></script>
+  <script defer src="sample-data.js?v=2.5.2"></script>
+  <script defer src="timeline.js?v=2.5.2"></script>
 </body>
 </html>
