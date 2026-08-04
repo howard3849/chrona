@@ -5813,3 +5813,22 @@ html[data-preview-size="phone"] .timeline-viewport.is-phone-vertical .event-labe
 }
 
 
+
+/* Optional public-sample data layer */
+.sample-layer-toggle {
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  color:var(--text); font-size:13px; font-weight:650; cursor:pointer; user-select:none;
+}
+.sample-layer-toggle input { position:absolute; opacity:0; pointer-events:none; }
+.sample-layer-toggle i {
+  position:relative; flex:0 0 auto; width:38px; height:22px; border-radius:999px;
+  background:var(--surface-soft); border:1px solid var(--border-strong); transition:.18s ease;
+}
+.sample-layer-toggle i::after {
+  content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%;
+  background:var(--surface); box-shadow:0 1px 4px rgba(15,23,42,.22); transition:.18s ease;
+}
+.sample-layer-toggle input:checked + i { background:#2563eb; border-color:#2563eb; }
+.sample-layer-toggle input:checked + i::after { transform:translateX(16px); background:#fff; }
+.sample-layer-toggle input:focus-visible + i { outline:2px solid #60a5fa; outline-offset:2px; }
+.sample-layer-toggle input:disabled + i { opacity:.55; cursor:not-allowed; }

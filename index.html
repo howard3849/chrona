@@ -4,11 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Chrona — Interactive Timeline Explorer</title>
-  <link rel="stylesheet" href="styles.css?v=2.5.8">
-  <link rel="stylesheet" href="css/theme-colors.css?v=2.5.8">
-  <link rel="stylesheet" href="css/search.css?v=2.5.8">
-  <link rel="stylesheet" href="css/year-ruler.css?v=2.5.8">
-  <link rel="stylesheet" href="css/phone-period.css?v=2.5.8">
+  <link rel="stylesheet" href="styles.css?v=2.5.9">
+  <link rel="stylesheet" href="css/theme-colors.css?v=2.5.9">
+  <link rel="stylesheet" href="css/search.css?v=2.5.9">
+  <link rel="stylesheet" href="css/year-ruler.css?v=2.5.9">
+  <link rel="stylesheet" href="css/phone-period.css?v=2.5.9">
 </head>
 <body>
   <header class="app-header">
@@ -77,6 +77,11 @@
       <div class="default-sheet-settings">
         <input id="defaultSheetUrl" type="url" spellcheck="false" placeholder="Paste a Google Sheet URL" data-i18n-placeholder="sheet.placeholder" aria-label="Google Sheet URL" />
         <button id="saveDefaultSheetUrl" type="button" data-i18n="actions.reload">Reload</button>
+        <label class="sample-layer-toggle" for="includeSampleTimeline">
+          <span>Include sample timeline</span>
+          <input id="includeSampleTimeline" type="checkbox" role="switch" aria-label="Include sample timeline" />
+          <i aria-hidden="true"></i>
+        </label>
         <p class="settings-sheet-help"><a id="exportWorkbook" href="#">Export</a> to download the current timeline, translations, and configs as a Google Sheet-compatible workbook. New to Chrona? Download the sample spreadsheet <a href="chrona-sample-timeline.xlsx" download>here</a>.</p>
         <div id="defaultSheetStatus" class="default-sheet-status" role="status" aria-live="polite"></div>
         <div id="workbookTransferStatus" class="default-sheet-status" role="status" aria-live="polite"></div>
@@ -134,7 +139,7 @@
     <section class="settings-section settings-version-section">
       <div class="settings-version-row">
         <span data-i18n="settings.version">Version</span>
-        <code id="appVersion">v2.5.8</code>
+        <code id="appVersion">v2.5.9</code>
       </div>
     </section>
   </aside>
@@ -200,8 +205,8 @@
   </template>
 
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script defer src="version.js?v=2.5.8"></script>
-  <script defer src="sample-data.js?v=2.5.8"></script>
-  <script defer src="timeline.js?v=2.5.8"></script>
+  <script defer src="version.js?v=2.5.9"></script>
+  <script defer src="sample-data.js?v=2.5.9"></script>
+  <script defer src="timeline.js?v=2.5.9"></script>
 </body>
 </html>

@@ -26,7 +26,7 @@ Existing TimelineJS sheets should generally load without restructuring. Chrona r
 2. Open Chrona in a supported browser.
 3. In Settings, paste a shareable Google Sheet URL.
 4. Click **Reload** to load the timeline.
-5. Leave the URL blank and click **Reload** to return to the included sample timeline.
+5. Leave the URL blank and click **Reload** to return to the included sample timeline. When a private Sheet is loaded, use **Include sample timeline** to display the bundled public events alongside it.
 
 Chrona also includes an export link that downloads the current timeline, translations, and Config data as a Google Sheet-compatible workbook.
 
@@ -42,6 +42,10 @@ language_available   en-US,zh-TW,fr,es
 Human translation columns take priority. When a translated cell is missing, Chrona may translate the baseline text on the fly when the browser supports that language pair. Entries under `never_translate.*` remain unchanged.
 
 ## Version history
+
+### 2.5.9
+
+Separated the bundled public sample from the user’s private timeline. New users always begin with sample data, while users with a private Google Sheet can turn **Include sample timeline** on or off. When both layers are visible, private rows override matching sample Event IDs; export remains private-only. The public sample workbook was expanded with 52 modern landmark events across the United States, Britain, China, and Germany.
 
 ### 2.5.8
 
@@ -138,7 +142,7 @@ Fixed stale pointer and drag state after Reset so hover tooltips continue workin
 - `index.html` — application shell and Settings UI.
 - `timeline.js` — primary timeline behavior.
 - `styles.css` and `css/` — global and component styling.
-- `sample-data.js` — built-in fallback timeline.
+- `sample-data.js` — bundled public sample layer shown on first use and optionally combined with private data.
 - `chrona-sample-timeline.xlsx` — starter workbook.
 - `VERSION` and `version.js` — synchronized application version.
 - `docs/` — project and release documentation.

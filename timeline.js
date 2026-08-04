@@ -5,6 +5,7 @@
 
   const DEFAULT_SHEET_STORAGE_KEY = 'chrona-default-sheet-url';
   const ONBOARDING_DISMISSED_STORAGE_KEY = 'chrona-onboarding-dismissed-v2';
+  const INCLUDE_SAMPLE_STORAGE_KEY = 'chrona-include-sample-timeline-v1';
   const DEFAULT_EVENT_GID = 681184261;
   const DEFAULT_CONFIG_GID = 1696716043;
   // Legacy tab GIDs remain import-only so existing workbooks can be migrated.
@@ -87,6 +88,7 @@
   const onboardingAddSheet = document.getElementById('onboardingAddSheet');
   const exportWorkbookButton = document.getElementById('exportWorkbook');
   const workbookTransferStatus = document.getElementById('workbookTransferStatus');
+  const includeSampleTimelineInput = document.getElementById('includeSampleTimeline');
 
   const state = {
     events: [],
@@ -102,6 +104,7 @@
     groupColors: new Map(),
     configuredPrimaryGroups: [],
     workbookRows: { timeline: [], config: [] },
+    privateTimelineRows: [],
     browserTranslationCache: new Map(),
     browserTranslator: null,
     minTime: 1700,
@@ -656,6 +659,7 @@
   }
 
   syncSavedSheetUrlField();
+  syncSampleLayerControl();
   window.addEventListener('pageshow', syncSavedSheetUrlField);
   window.addEventListener('storage', event => {
     if (event.key === DEFAULT_SHEET_STORAGE_KEY) syncSavedSheetUrlField();
@@ -687,6 +691,7 @@
         localStorage.removeItem(ONBOARDING_DISMISSED_STORAGE_KEY);
       }
       syncSavedSheetUrlField();
+      syncSampleLayerControl();
       updateOnboardingNotice();
       defaultSheetStatus.textContent = state.language === 'zh-TW' ? '正在重新載入…' : 'Reloading…';
       await loadTimeline();
@@ -709,6 +714,11 @@
     loadTimeline();
     closeSheetControl();
   });
+  includeSampleTimelineInput?.addEventListener('change', async () => {
+    localStorage.setItem(INCLUDE_SAMPLE_STORAGE_KEY, String(includeSampleTimelineInput.checked));
+    await loadTimeline();
+  });
+
   exportWorkbookButton?.addEventListener('click', async event => {
     event.preventDefault();
     exportWorkbookButton.setAttribute('aria-disabled', 'true');
@@ -1220,13 +1230,21 @@
       })
       .map(row => ({ Key: String(row.Key || row.Setting || '').trim(), Value: String(row.Value || '') }));
 
+    const exportGroups = [...new Set(state.workbookRows.timeline
+      .map(row => String(row.Group || row.Category || '').trim())
+      .filter(Boolean))];
+    const exportGroupSet = new Set(exportGroups);
+    const privateNeverTranslate = state.workbookRows.config
+      .filter(row => /^never_translate(?:\.|$)/i.test(String(row.Key || row.Setting || '').trim()))
+      .map(row => String(row.Value || '').trim())
+      .filter(Boolean);
     const rows = [
       { Key: 'language_baseline', Value: state.baselineLanguage },
       { Key: 'language_available', Value: state.availableLanguages.join(',') },
-      { Key: 'primary_groups', Value: [...state.aboveGroups].join(',') }
+      { Key: 'primary_groups', Value: [...state.aboveGroups].filter(name => exportGroupSet.has(name)).join(',') }
     ];
-    categoryNames().forEach(name => rows.push({ Key: `group_color.${name}`, Value: state.categories.get(name)?.color || stableGroupColor(name) }));
-    state.neverTranslate.forEach((term, index) => rows.push({ Key: `never_translate.${index + 1}`, Value: term }));
+    exportGroups.forEach(name => rows.push({ Key: `group_color.${name}`, Value: state.categories.get(name)?.color || stableGroupColor(name) }));
+    privateNeverTranslate.forEach((term, index) => rows.push({ Key: `never_translate.${index + 1}`, Value: term }));
     return [...rows, ...retained];
   }
 
@@ -1325,8 +1343,60 @@
   const SAMPLE_CATEGORIES = SAMPLE_DATA.categories;
   const SAMPLE_EVENTS = SAMPLE_DATA.events;
 
-  function applyRows(rawEvents, rawCategories, sourceLabel) {
-    state.workbookRows.timeline = rawEvents.map(row => ({ ...row }));
+  function sampleLayerDefault() {
+    const stored = localStorage.getItem(INCLUDE_SAMPLE_STORAGE_KEY);
+    if (stored != null) return stored === 'true';
+    // Existing users with a saved private source are not surprised on upgrade.
+    // Brand-new users start with the public sample enabled, and that choice
+    // remains enabled when they add their first private Sheet.
+    const enabled = !localStorage.getItem(DEFAULT_SHEET_STORAGE_KEY);
+    localStorage.setItem(INCLUDE_SAMPLE_STORAGE_KEY, String(enabled));
+    return enabled;
+  }
+
+  function sampleLayerEnabled() {
+    return includeSampleTimelineInput ? includeSampleTimelineInput.checked : sampleLayerDefault();
+  }
+
+  function syncSampleLayerControl() {
+    if (!includeSampleTimelineInput) return;
+    const hasPrivateUrl = Boolean(String(sheetUrlInput?.value || '').trim());
+    includeSampleTimelineInput.checked = hasPrivateUrl ? sampleLayerDefault() : true;
+    includeSampleTimelineInput.disabled = !hasPrivateUrl;
+  }
+
+  function mergeTimelineRows(sampleRows, privateRows) {
+    const result = [];
+    const privateIds = new Set(privateRows.map(row => String(row['Event ID'] || '').trim()).filter(Boolean));
+    sampleRows.forEach(row => {
+      const id = String(row['Event ID'] || '').trim();
+      if (!id || !privateIds.has(id)) result.push({ ...row, __chronaSource: 'sample' });
+    });
+    privateRows.forEach(row => result.push({ ...row, __chronaSource: 'private' }));
+    return result;
+  }
+
+  function mergeConfigRows(sampleRows, privateRows) {
+    const regular = new Map();
+    const protectedValues = [];
+    const add = (rows, privateWins) => rows.forEach(row => {
+      const key = String(row.Key || row.Setting || '').trim();
+      const value = String(row.Value ?? '').trim();
+      if (!key) return;
+      if (/^never_translate(?:\.|$)/i.test(key)) {
+        if (value && !protectedValues.includes(value)) protectedValues.push(value);
+        return;
+      }
+      if (privateWins || !regular.has(key)) regular.set(key, { Key: key, Value: value });
+    });
+    add(sampleRows, false);
+    add(privateRows, true);
+    protectedValues.forEach((value, index) => regular.set(`never_translate.${index + 1}`, { Key: `never_translate.${index + 1}`, Value: value }));
+    return [...regular.values()];
+  }
+
+  function applyRows(rawEvents, rawCategories, sourceLabel, exportTimelineRows = rawEvents) {
+    state.workbookRows.timeline = exportTimelineRows.map(row => ({ ...row }));
     state.categories.clear();
     const legacyGroups = new Map(rawCategories.map(row => [String(row.Group || row.Category || '').trim(), row]));
     const groupNamesFromRows = [...new Set(rawEvents.map(row => String(row.Group || row.Category || 'Uncategorized').trim()).filter(Boolean))];
@@ -1374,7 +1444,8 @@
         mediaCaption: row['Media Caption'] || row.MediaCaption || row.mediaCaption || '',
         categoryLabel: categoryName,
         mediaCredit: row['Media Credit'] || row.MediaCredit || row.mediaCredit || '',
-        thumbnail: normalizeMediaUrl(row['Media Thumbnail'] || row.Thumbnail || row['Thumbnail URL'] || row.mediaThumbnail || row.thumbnail || '')
+        thumbnail: normalizeMediaUrl(row['Media Thumbnail'] || row.Thumbnail || row['Thumbnail URL'] || row.mediaThumbnail || row.thumbnail || ''),
+        dataSource: row.__chronaSource || 'private'
       };
     }).filter(e => e.visible && e.elementType !== 'Title');
 
@@ -1413,13 +1484,16 @@
     statusEl.classList.remove('status-warning');
     statusEl.textContent = t('status.loading');
     const requestedUrl = sheetUrlInput.value.trim();
+    syncSampleLayerControl();
+
+    const sampleConfig = window.CHRONA_SAMPLE_DATA?.config || window.CHRONA_SAMPLE_DATA?.settings || [];
     if (!requestedUrl) {
       loadTranslations([]);
-      loadConfig(window.CHRONA_SAMPLE_DATA?.config || window.CHRONA_SAMPLE_DATA?.settings || [], SAMPLE_EVENTS);
+      loadConfig(sampleConfig, SAMPLE_EVENTS);
       if (!SAMPLE_EVENTS.length) throw new Error('Sample data is unavailable.');
-      applyRows(SAMPLE_EVENTS, SAMPLE_CATEGORIES, 'sample timeline');
+      applyRows(SAMPLE_EVENTS.map(row => ({ ...row, __chronaSource: 'sample' })), SAMPLE_CATEGORIES, 'sample timeline', SAMPLE_EVENTS);
       setLanguage(state.language, false);
-      statusEl.textContent = `${state.events.length} timeline records loaded — add a Google Sheet URL in Settings.`;
+      statusEl.textContent = `${state.events.length} sample timeline records loaded — add a Google Sheet URL in Settings.`;
       return;
     }
 
@@ -1443,32 +1517,42 @@
         optional('Dictionary', DEFAULT_DICTIONARY_GID, 'Legacy Dictionary tab unavailable.')
       ]);
 
-      const timelineRows = rowsToObjects(parseCsv(eventResult.text));
-      let configRows = configResult ? rowsToObjects(parseCsv(configResult.text)) : [];
-      if (!configRows.length && legacySettingsResult) {
-        configRows = rowsToObjects(parseCsv(legacySettingsResult.text)).map(row => ({ Key: row.Setting, Value: row.Value }));
+      const privateRows = rowsToObjects(parseCsv(eventResult.text));
+      let privateConfig = configResult ? rowsToObjects(parseCsv(configResult.text)) : [];
+      if (!privateConfig.length && legacySettingsResult) {
+        privateConfig = rowsToObjects(parseCsv(legacySettingsResult.text)).map(row => ({ Key: row.Setting, Value: row.Value }));
       }
       if (legacyDictionaryResult) {
         const legacyTerms = rowsToObjects(parseCsv(legacyDictionaryResult.text));
         legacyTerms.forEach((row, index) => {
           const term = String(row.Term || row['Display As'] || '').trim();
-          if (term) configRows.push({ Key: `never_translate.legacy${index + 1}`, Value: term });
+          if (term) privateConfig.push({ Key: `never_translate.legacy${index + 1}`, Value: term });
         });
       }
-      loadConfig(configRows, timelineRows);
+
+      const includeSample = sampleLayerEnabled();
+      const displayRows = includeSample ? mergeTimelineRows(SAMPLE_EVENTS, privateRows) : privateRows.map(row => ({ ...row, __chronaSource: 'private' }));
+      const effectiveConfig = includeSample ? mergeConfigRows(sampleConfig, privateConfig) : privateConfig;
+      loadConfig(effectiveConfig, displayRows);
+      // Export remains private-only when a private workbook is loaded.
+      state.workbookRows.config = privateConfig.map(row => ({ ...row }));
+      state.privateTimelineRows = privateRows.map(row => ({ ...row }));
       loadTranslations(legacyTranslationsResult ? rowsToObjects(parseCsv(legacyTranslationsResult.text)) : []);
       const legacyGroups = legacyGroupsResult ? rowsToObjects(parseCsv(legacyGroupsResult.text)) : [];
 
-      applyRows(timelineRows, legacyGroups, `live Google Sheet via ${eventResult.sourceLabel}`);
+      const sourceLabel = includeSample
+        ? `private Google Sheet + bundled sample via ${eventResult.sourceLabel}`
+        : `private Google Sheet via ${eventResult.sourceLabel}`;
+      applyRows(displayRows, legacyGroups, sourceLabel, privateRows);
       setLanguage(state.language, false);
-      statusEl.textContent = t('status.records', { count: state.events.length, source: `live Google Sheet via ${eventResult.sourceLabel}` });
+      statusEl.textContent = t('status.records', { count: state.events.length, source: sourceLabel });
       translateMissingEvents();
     } catch (error) {
-      console.warn('Live sheet unavailable; using sample-data.js.', error);
+      console.warn('Private sheet unavailable; using sample-data.js.', error);
       loadTranslations([]);
-      loadConfig(window.CHRONA_SAMPLE_DATA?.config || window.CHRONA_SAMPLE_DATA?.settings || [], SAMPLE_EVENTS);
+      loadConfig(sampleConfig, SAMPLE_EVENTS);
       if (!SAMPLE_EVENTS.length) throw error;
-      applyRows(SAMPLE_EVENTS, SAMPLE_CATEGORIES, 'sample timeline');
+      applyRows(SAMPLE_EVENTS.map(row => ({ ...row, __chronaSource: 'sample' })), SAMPLE_CATEGORIES, 'sample timeline', SAMPLE_EVENTS);
       setLanguage(state.language, false);
       statusEl.classList.add('status-warning');
       statusEl.textContent = `Google Sheet could not be loaded; showing the bundled sample timeline instead. ${error.message}`;
