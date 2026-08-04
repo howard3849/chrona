@@ -8,8 +8,9 @@ cd "$REPO_DIR"
 VERSION_FILE="$REPO_DIR/VERSION"
 INDEX_FILE="$REPO_DIR/index.html"
 VERSION_JS="$REPO_DIR/version.js"
+README_FILE="$REPO_DIR/README.md"
 
-if [[ ! -f "$VERSION_FILE" || ! -f "$INDEX_FILE" || ! -f "$REPO_DIR/timeline.js" ]]; then
+if [[ ! -f "$VERSION_FILE" || ! -f "$INDEX_FILE" || ! -f "$REPO_DIR/timeline.js" || ! -f "$README_FILE" ]]; then
   echo "ERROR: Run this tool from a complete Chrona project."
   exit 1
 fi
@@ -63,6 +64,16 @@ fi
 
 if ! grep -Fq "id=\"appVersion\">v$next<" "$INDEX_FILE"; then
   echo "ERROR: Settings version does not match VERSION."
+  errors=1
+fi
+
+if ! grep -Eq "^### ${next//./\.}$" "$README_FILE"; then
+  echo "ERROR: README.md is missing a version-history entry for $next."
+  errors=1
+fi
+
+if [[ ! -f "$REPO_DIR/docs/RELEASE-v${next}.md" ]]; then
+  echo "ERROR: Missing docs/RELEASE-v${next}.md."
   errors=1
 fi
 

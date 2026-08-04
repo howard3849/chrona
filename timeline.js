@@ -153,7 +153,10 @@
     overviewDragOffsetRatio: 0,
     overviewDragStartRatio: 0,
     overviewDragStartViewStart: 0,
-    overviewDragStartViewEnd: 0
+    overviewDragStartViewEnd: 0,
+    overviewRefreshTimer: null,
+    overviewCategorySnapshot: new Set(),
+    overviewBounds: null
   };
 
   const UI_STRINGS = {
@@ -675,19 +678,21 @@
   });
   saveDefaultSheetUrlButton?.addEventListener('click', async () => {
     const value = sheetUrlInput?.value.trim() || '';
-    if (!value) {
-      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '請輸入 Google 試算表網址。' : 'Enter a Google Sheet URL.';
-      sheetUrlInput?.focus();
-      return;
-    }
     try {
-      parseSheetSource(value);
-      localStorage.setItem(DEFAULT_SHEET_STORAGE_KEY, value);
+      if (value) {
+        parseSheetSource(value);
+        localStorage.setItem(DEFAULT_SHEET_STORAGE_KEY, value);
+      } else {
+        localStorage.removeItem(DEFAULT_SHEET_STORAGE_KEY);
+        localStorage.removeItem(ONBOARDING_DISMISSED_STORAGE_KEY);
+      }
       syncSavedSheetUrlField();
       updateOnboardingNotice();
       defaultSheetStatus.textContent = state.language === 'zh-TW' ? '正在重新載入…' : 'Reloading…';
       await loadTimeline();
-      defaultSheetStatus.textContent = state.language === 'zh-TW' ? '時間軸已重新載入。' : 'Timeline reloaded.';
+      defaultSheetStatus.textContent = value
+        ? (state.language === 'zh-TW' ? '時間軸已重新載入。' : 'Timeline reloaded.')
+        : (state.language === 'zh-TW' ? '已清除試算表網址並載入範例時間軸。' : 'Sheet URL cleared. Sample timeline loaded.');
     } catch (error) {
       defaultSheetStatus.textContent = error.message;
       sheetUrlInput?.focus();
@@ -1394,6 +1399,8 @@
     }
     buildFilters();
     buildAboveSetsMenu();
+    state.overviewCategorySnapshot = new Set(state.enabledCategories);
+    state.overviewBounds = null;
     const times = state.events.flatMap(e => [e.start, e.end]).filter(v => v != null);
     state.minTime = Math.min(...times);
     state.maxTime = Math.max(...times);
@@ -1481,6 +1488,39 @@
     else state.enabledCategories.delete(name);
     buildFilters();
     scheduleRender();
+    scheduleOverviewRefresh();
+  }
+
+  function scheduleOverviewRefresh() {
+    if (state.overviewRefreshTimer) clearTimeout(state.overviewRefreshTimer);
+    state.overviewRefreshTimer = setTimeout(() => {
+      state.overviewRefreshTimer = null;
+      state.overviewCategorySnapshot = new Set(state.enabledCategories);
+      state.overviewBounds = calculateOverviewBounds(state.overviewCategorySnapshot);
+      scheduleRender();
+    }, 140);
+  }
+
+  function overviewEvents(categorySet = state.overviewCategorySnapshot) {
+    const active = categorySet instanceof Set ? categorySet : state.enabledCategories;
+    return state.events.filter(event =>
+      event.elementType !== 'Title' && active.has(event.category)
+    );
+  }
+
+  function calculateOverviewBounds(categorySet = state.overviewCategorySnapshot) {
+    const events = overviewEvents(categorySet);
+    const values = events.flatMap(event => [event.start, event.end]).filter(Number.isFinite);
+    if (!values.length) {
+      return state.overviewBounds || { min: state.minTime, max: Math.max(state.minTime + 0.0001, state.maxTime) };
+    }
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+    const rawSpan = Math.max(0.0001, max - min);
+    const padding = Math.max(0.25, rawSpan * 0.04);
+    min -= padding;
+    max += padding;
+    return { min, max: Math.max(min + 0.0001, max) };
   }
 
   function buildFilters() {
@@ -1592,10 +1632,10 @@
 
 
   function overviewDataBounds() {
-    return {
-      min: state.minTime,
-      max: Math.max(state.minTime + 0.0001, state.maxTime)
-    };
+    if (!state.overviewBounds) {
+      state.overviewBounds = calculateOverviewBounds();
+    }
+    return state.overviewBounds;
   }
 
   function navigationBounds() {
@@ -3921,10 +3961,11 @@
     overviewCtx.setTransform(dpr,0,0,dpr,0,0);
     overviewCtx.clearRect(0,0,rect.width,rect.height);
 
-    const dataMin = state.minTime;
-    const dataMax = Math.max(state.minTime + .0001, state.maxTime);
+    const bounds = overviewDataBounds();
+    const dataMin = bounds.min;
+    const dataMax = bounds.max;
     const span = Math.max(.0001, dataMax - dataMin);
-    const allEvents = state.events.filter(event => event.elementType !== 'Title');
+    const allEvents = overviewEvents();
     const periods = allEvents.filter(event => event.elementType === 'Period' && Number.isFinite(event.end));
     const points = allEvents.filter(event => event.elementType !== 'Period');
     const vertical = isPhoneVerticalMode();
@@ -3974,8 +4015,15 @@
       const bottom = ((state.viewEnd - dataMin) / span) * rect.height;
       const clampedTop = Math.max(0, Math.min(rect.height, top));
       const clampedBottom = Math.max(0, Math.min(rect.height, bottom));
+      // In vertical phone mode the base desktop rule still gives the focus
+      // window a bottom inset. Clear it explicitly so top + height control the
+      // frame. Leaving bottom set over-constrains the absolutely positioned
+      // element, causing the frame to retain its old size and making pointer
+      // hit-testing disagree with the visible frame after radar rescaling.
       overviewWindow.style.left = '0px';
       overviewWindow.style.width = '100%';
+      overviewWindow.style.right = '';
+      overviewWindow.style.bottom = 'auto';
       overviewWindow.style.top = `${clampedTop}px`;
       overviewWindow.style.height = `${Math.max(10, clampedBottom - clampedTop)}px`;
     } else {
@@ -4013,8 +4061,12 @@
       const right = ((state.viewEnd - dataMin) / span) * rect.width;
       const clampedLeft = Math.max(0, Math.min(rect.width, left));
       const clampedRight = Math.max(0, Math.min(rect.width, right));
+      // Restore the desktop/iPad top-and-bottom inset after leaving phone
+      // mode; phone mode sets bottom:auto so its height can be controlled.
       overviewWindow.style.top = '';
+      overviewWindow.style.bottom = '';
       overviewWindow.style.height = '';
+      overviewWindow.style.right = '';
       overviewWindow.style.left = `${clampedLeft}px`;
       overviewWindow.style.width = `${Math.max(8, clampedRight - clampedLeft)}px`;
     }

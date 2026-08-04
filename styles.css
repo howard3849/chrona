@@ -1,44 +1,52 @@
 :root {
   color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
-  --bg: #f6f7f8;
-  --bg-top: #fbfbfc;
-  --surface: rgba(255,255,255,.88);
-  --surface-solid: #ffffff;
-  --surface-soft: #f3f5f7;
-  --surface-hover: #eef1f4;
-  --text: #17191c;
-  --text-muted: #69717d;
-  --text-soft: #8a929d;
-  --border: rgba(28,35,43,.13);
-  --border-strong: rgba(28,35,43,.2);
-  --axis: #30363d;
-  --tick-major: #68717b;
-  --tick-minor: #c4cbd2;
+  --bg: #e7ecf3;
+  --bg-top: #f2f5f9;
+  --surface: rgba(248,250,253,.94);
+  --surface-solid: #fbfcfe;
+  --surface-soft: #e7ecf3;
+  --surface-hover: #dde5ef;
+  --surface-canvas: #fbfaf6;
+  --surface-axis-band: rgba(218,224,234,.52);
+  --surface-radar: #dce4ef;
+  --surface-radar-deep: #ced8e6;
+  --text: #202735;
+  --text-muted: #687386;
+  --text-soft: #8993a3;
+  --border: rgba(44,55,72,.13);
+  --border-strong: rgba(44,55,72,.21);
+  --axis: #596273;
+  --tick-major: #667183;
+  --tick-minor: #cbd2dd;
   --focus: rgba(10,102,255,.19);
   --shadow-low: 0 1px 2px rgba(17,24,39,.04), 0 6px 18px rgba(17,24,39,.05);
   --shadow-float: 0 18px 50px rgba(17,24,39,.16), 0 3px 12px rgba(17,24,39,.08);
-  --paper-noise: .045;
+  --paper-noise: .065;
   background: var(--bg);
   color: var(--text);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #101214;
-  --bg-top: #15181b;
-  --surface: rgba(28,31,35,.82);
-  --surface-solid: #1c1f23;
-  --surface-soft: #202429;
-  --surface-hover: #292e34;
-  --text: #f1f3f5;
-  --text-muted: #a8b0ba;
-  --text-soft: #7d8792;
-  --border: rgba(255,255,255,.11);
-  --border-strong: rgba(255,255,255,.18);
-  --axis: #ffffff;
-  --tick-major: #a8b0ba;
-  --tick-minor: #4c545d;
+  --bg: #10151d;
+  --bg-top: #151b24;
+  --surface: rgba(23,29,39,.88);
+  --surface-solid: #171d27;
+  --surface-soft: #1d2531;
+  --surface-hover: #26303e;
+  --surface-canvas: #141a23;
+  --surface-axis-band: rgba(74,86,105,.23);
+  --surface-radar: #1a2230;
+  --surface-radar-deep: #151c28;
+  --text: #edf1f7;
+  --text-muted: #a0abbb;
+  --text-soft: #748095;
+  --border: rgba(226,233,244,.11);
+  --border-strong: rgba(226,233,244,.19);
+  --axis: #aeb8c7;
+  --tick-major: #a7b2c2;
+  --tick-minor: #3b4658;
   --focus: rgba(94,161,255,.25);
   --shadow-low: 0 1px 2px rgba(0,0,0,.25), 0 10px 28px rgba(0,0,0,.18);
   --shadow-float: 0 24px 64px rgba(0,0,0,.42), 0 4px 16px rgba(0,0,0,.32);
@@ -154,7 +162,7 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: var(--surface-solid);
+  background: linear-gradient(180deg, #fffefb 0%, var(--surface-canvas) 48%, #f5f3ed 100%);
   box-shadow: none;
   touch-action: none;
   user-select: none;
@@ -174,6 +182,88 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
 .timeline-viewport:focus { box-shadow: inset 0 0 0 2px var(--focus); }
 #timelineCanvas, .label-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
 .label-layer { pointer-events: none; overflow: hidden; z-index: 2; }
+
+/* v2.5.7 — stronger layered surfaces and desktop paper canvas.
+   Desktop gains depth; iPad and iPhone remain edge-to-edge and space efficient. */
+@media (min-width: 1025px) {
+  body {
+    padding: 12px;
+    gap: 0;
+    background:
+      radial-gradient(circle at 18% 0%, rgba(255,255,255,.72), transparent 34%),
+      linear-gradient(180deg, #eef2f7 0%, #e2e8f1 100%);
+  }
+
+  :root[data-theme="dark"] body {
+    background:
+      radial-gradient(circle at 18% 0%, rgba(84,102,130,.18), transparent 34%),
+      linear-gradient(180deg, #141b25 0%, #0d1219 100%);
+  }
+
+  .app-header {
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 12px 34px rgba(28,39,58,.08);
+  }
+
+  .toolbar {
+    margin-bottom: 10px;
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-radius: 0 0 18px 18px;
+    box-shadow: 0 14px 34px rgba(28,39,58,.08);
+  }
+
+  main {
+    border: 1px solid color-mix(in srgb, var(--border-strong) 72%, transparent);
+    border-radius: 20px;
+    box-shadow: 0 18px 46px rgba(28,39,58,.13), 0 2px 8px rgba(28,39,58,.06);
+    overflow: hidden;
+    background: var(--surface-canvas);
+  }
+
+  .timeline-viewport {
+    border-radius: 19px 19px 0 0;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.70) 0%, transparent 22%),
+      linear-gradient(180deg, #fffefb 0%, #fbfaf6 52%, #f3f1ea 100%);
+  }
+
+  :root[data-theme="dark"] .timeline-viewport {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.025) 0%, transparent 24%),
+      linear-gradient(180deg, #171e28 0%, #141a23 54%, #111720 100%);
+  }
+
+  .overview-navigator {
+    border-radius: 0 0 19px 19px;
+    background: linear-gradient(180deg, var(--surface-radar), var(--surface-radar-deep));
+  }
+}
+
+@media (max-width: 1024px) {
+  body { padding: 0; }
+  .app-header, .toolbar, main, .timeline-viewport, .overview-navigator {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .timeline-viewport {
+    background: linear-gradient(180deg, #fffefb 0%, var(--surface-canvas) 55%, #f5f3ed 100%);
+  }
+  :root[data-theme="dark"] .timeline-viewport {
+    background: linear-gradient(180deg, #171d27 0%, var(--surface-canvas) 55%, #111720 100%);
+  }
+}
+
+/* Phone radar is a pure navigator; desktop-only labels waste vertical space. */
+@media (max-width: 699px) and (orientation: portrait) {
+  .overview-navigator .overview-heading { display: none !important; }
+}
+html[data-preview-size="phone"] .overview-navigator .overview-heading {
+  display: none !important;
+}
 
 .event-label {
   position: absolute;
@@ -345,12 +435,12 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
 .detail-panel img { width:100%; max-height:210px; object-fit:cover; margin:12px 0 6px; border-radius:0; }
 .detail-panel a { color:#3b82f6; font-weight:600; text-decoration:none; }
 .detail-panel a:hover { text-decoration:underline; }
-.overview-navigator { position:relative; z-index:8; height:86px; flex:0 0 86px; border-top:1px solid var(--border-strong); background:var(--surface-solid); padding:7px 18px 10px; touch-action:none; user-select:none; overflow:hidden; box-shadow:0 -6px 18px rgba(15,23,42,.06); }
+.overview-navigator { position:relative; z-index:8; height:86px; flex:0 0 86px; border-top:1px solid var(--border-strong); background:linear-gradient(180deg,var(--surface-radar),var(--surface-radar-deep)); padding:7px 18px 10px; touch-action:none; user-select:none; overflow:hidden; box-shadow:0 -8px 24px rgba(15,23,42,.07), inset 0 1px 0 color-mix(in srgb, white 45%, transparent); }
 .overview-heading { height:20px; display:flex; justify-content:space-between; align-items:center; gap:16px; color:var(--text-muted); font-size:11px; font-weight:650; letter-spacing:.035em; text-transform:uppercase; }
 .overview-heading span:last-child { font-weight:500; letter-spacing:0; text-transform:none; color:var(--text-soft); }
-.overview-track { position:relative; height:48px; border:1px solid var(--border); background:var(--surface-soft); overflow:hidden; cursor:crosshair; }
+.overview-track { position:relative; height:48px; border:1px solid color-mix(in srgb,var(--border-strong) 78%,transparent); border-radius:8px; background:color-mix(in srgb,var(--surface-radar-deep) 72%,var(--surface-solid)); overflow:hidden; cursor:crosshair; box-shadow:inset 0 1px 2px rgba(20,30,48,.08); }
 #overviewCanvas { width:100%; height:100%; display:block; }
-.overview-window { position:absolute; top:2px; bottom:2px; min-width:28px; border:2px solid var(--text); background:color-mix(in srgb,var(--surface-solid) 22%,transparent); cursor:grab; box-shadow:0 0 0 1px color-mix(in srgb,var(--surface-solid) 65%,transparent) inset; z-index:3; }
+.overview-window { position:absolute; top:2px; bottom:2px; min-width:28px; border:1.5px solid color-mix(in srgb,var(--text) 72%,transparent); border-radius:7px; background:color-mix(in srgb,var(--surface-solid) 56%,transparent); cursor:grab; box-shadow:0 3px 12px rgba(31,41,55,.14), inset 0 0 0 1px color-mix(in srgb,var(--surface-solid) 72%,transparent); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); z-index:3; }
 .overview-window:active { cursor:grabbing; }
 .overview-handle { position:absolute; top:-2px; bottom:-2px; width:18px; cursor:ew-resize; z-index:5; background:transparent; }
 .overview-handle::after { content:""; position:absolute; top:7px; bottom:7px; width:4px; border-radius:2px; background:var(--text); box-shadow:0 0 0 1px color-mix(in srgb,var(--surface-solid) 75%,transparent); }
@@ -420,16 +510,15 @@ html[data-theme="dark"] #status.status-warning {
 }
 body {
   background:
-    radial-gradient(900px 520px at 4% -10%, rgba(31,140,255,.18), transparent 62%),
-    radial-gradient(820px 480px at 96% 4%, rgba(139,92,246,.17), transparent 64%),
-    radial-gradient(720px 440px at 55% 105%, rgba(34,211,238,.10), transparent 62%),
+    radial-gradient(980px 560px at 8% -16%, color-mix(in srgb, #7ba7e8 11%, transparent), transparent 64%),
+    radial-gradient(860px 520px at 96% -12%, color-mix(in srgb, #a78bd7 8%, transparent), transparent 66%),
     linear-gradient(180deg, var(--bg-top), var(--bg));
 }
 .app-header, .toolbar {
-  background: color-mix(in srgb, var(--surface-solid) 64%, transparent);
-  backdrop-filter: blur(28px) saturate(1.45);
-  -webkit-backdrop-filter: blur(28px) saturate(1.45);
-  border-color: color-mix(in srgb, var(--border) 65%, white 35%);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(24px) saturate(1.18);
+  -webkit-backdrop-filter: blur(24px) saturate(1.18);
+  border-color: var(--border);
 }
 
 button:hover, .filter-chip:hover {
@@ -438,9 +527,10 @@ button:hover, .filter-chip:hover {
 }
 .timeline-viewport {
   background:
-    radial-gradient(660px 360px at 12% 12%, rgba(59,130,246,.08), transparent 68%),
-    radial-gradient(720px 420px at 88% 18%, rgba(139,92,246,.07), transparent 70%),
-    color-mix(in srgb, var(--surface-solid) 88%, transparent);
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface-canvas) 99%, white 1%) 0%,
+      var(--surface-canvas) 48%,
+      color-mix(in srgb, var(--surface-canvas) 92%, var(--surface-soft) 8%) 100%);
 }
 .event-label {
   --event-color: #64748b;
@@ -1588,6 +1678,20 @@ button:hover,
 .settings-panel .theme-control { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
 .settings-panel .theme-control button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--text); -webkit-text-fill-color: var(--text); }
 
+/* Theme-specific event surface tokens sit on top of the shared Neutral Studio shell. */
+:root[data-visual-theme="ai"] {
+  --event-surface-shadow: 0 5px 16px rgba(8,14,28,.18);
+}
+:root[data-visual-theme="gradient"] {
+  --event-surface-shadow: 0 7px 18px color-mix(in srgb, var(--event-color, #64748b) 24%, transparent);
+}
+:root[data-visual-theme="flat"] {
+  --event-surface-shadow: 0 2px 7px rgba(30,40,60,.10);
+}
+:root[data-visual-theme="metro"] {
+  --event-surface-shadow: none;
+}
+
 /* Flat theme: the original diagram-like Chrona look. */
 :root[data-visual-theme="flat"] .event-label {
   border-radius: 0 !important;
@@ -1595,7 +1699,7 @@ button:hover,
   -webkit-text-fill-color: currentColor !important;
   background: color-mix(in srgb, var(--event-color) 16%, var(--surface-solid)) !important;
   border: 1px solid color-mix(in srgb, var(--event-color) 74%, #08111f) !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .08) !important;
+  box-shadow: var(--event-surface-shadow) !important;
   text-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -2403,7 +2507,7 @@ button:hover,
   background:
     linear-gradient(rgba(8, 12, 20, .96), rgba(8, 12, 20, .96)) padding-box,
     linear-gradient(90deg, #168cff 0%, #6f63ff 48%, #ff3d9a 100%) border-box !important;
-  box-shadow: 0 4px 12px rgba(3, 7, 18, .18) !important;
+  box-shadow: var(--event-surface-shadow) !important;
   text-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
