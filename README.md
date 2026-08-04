@@ -43,7 +43,11 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
-### 2.5.9
+### 2.5.11
+
+Fixed human translation-column priority. Chrona now recognizes equivalent Chinese language tags such as `zh-TW` and `zh-Hant`, always prefers populated human-authored columns such as `Title [zh-TW]` and `Description [zh-TW]`, and uses machine translation only when no matching human text is available.
+
+### 2.5.10
 
 Separated the bundled public sample from the user’s private timeline. New users always begin with sample data, while users with a private Google Sheet can turn **Include sample timeline** on or off. When both layers are visible, private rows override matching sample Event IDs; export remains private-only. The public sample workbook was expanded with 52 modern landmark events across the United States, Britain, China, and Germany.
 

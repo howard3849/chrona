@@ -503,12 +503,43 @@
     return sanitizeTranslationArtifacts(translatedText, replacements);
   }
 
+  function translationLanguageCandidates(language) {
+    const normalized = normalizeLanguageCode(language);
+    if (!normalized) return [];
+    const candidates = [normalized];
+    const lower = normalized.toLowerCase();
+
+    // Treat script and region variants as equivalent for worksheet lookup.
+    // This lets a selected browser language such as zh-Hant use a human
+    // worksheet column named Title [zh-TW], and vice versa.
+    if (lower === 'zh-hant' || lower === 'zh-tw' || lower === 'zh-hk' || lower === 'zh-mo') {
+      candidates.push('zh-TW', 'zh-Hant', 'zh-HK', 'zh');
+    } else if (lower === 'zh-hans' || lower === 'zh-cn' || lower === 'zh-sg') {
+      candidates.push('zh-CN', 'zh-Hans', 'zh');
+    } else if (normalized.includes('-')) {
+      candidates.push(normalized.split('-')[0]);
+    }
+    return [...new Set(candidates.map(normalizeLanguageCode).filter(Boolean))];
+  }
+
   function savedTranslation(entityId, field, sourceText) {
     if (state.language === state.baselineLanguage) return '';
-    const record = state.translations.get(translationMapKey(entityId, state.language, field));
-    if (!record) return '';
-    if (record.sourceText && sourceText && record.sourceText !== sourceText && record.status !== 'approved') return '';
-    return sanitizeTranslationArtifacts(record.translation);
+    for (const language of translationLanguageCandidates(state.language)) {
+      const record = state.translations.get(translationMapKey(entityId, language, field));
+      if (!record) continue;
+
+      // Human-authored inline worksheet translations are authoritative.
+      // Source-text drift checks apply only to generated/legacy machine entries.
+      const status = String(record.status || '').toLowerCase();
+      const humanAuthored = status === 'human' || status === 'approved';
+      const savedSource = String(record.sourceText || '').trim();
+      const currentSource = String(sourceText || '').trim();
+      if (!humanAuthored && savedSource && currentSource && savedSource !== currentSource) continue;
+
+      const translation = sanitizeTranslationArtifacts(record.translation);
+      if (translation) return translation;
+    }
+    return '';
   }
 
   function groupDisplayName(groupName) {
@@ -1476,6 +1507,7 @@
     state.minTime = Math.min(...times);
     state.maxTime = Math.max(...times);
     resetView();
+    renderAfterDataLoad();
     statusEl.textContent = t('status.records', { count: state.events.length, source: sourceLabel });
   }
 
@@ -2080,6 +2112,25 @@
     requestAnimationFrame(() => {
       state.renderQueued = false;
       render();
+    });
+  }
+
+  // Data loading can finish while the responsive shell is still recalculating
+  // its height (especially when the sample layer adds group chips). The radar
+  // has its own fixed track and can render while the main viewport is still at
+  // zero height. Retry the main render after layout settles so the canvas and
+  // label layer never remain blank after a successful load.
+  function renderAfterDataLoad(attempt = 0) {
+    requestAnimationFrame(() => {
+      const rect = viewport.getBoundingClientRect();
+      if ((!rect.width || !rect.height) && attempt < 4) {
+        setTimeout(() => renderAfterDataLoad(attempt + 1), 40 * (attempt + 1));
+        return;
+      }
+      state.renderQueued = false;
+      render();
+      // One additional frame catches late toolbar wrapping and font layout.
+      if (attempt === 0) requestAnimationFrame(() => render());
     });
   }
 
