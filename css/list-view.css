@@ -1,0 +1,74 @@
+
+.list-view-toggle svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.list-view-toggle.is-active { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent-text) 42%, var(--border)); }
+.list-view-backdrop { position: fixed; left: 0; right: 0; top: var(--list-view-safe-top, 140px); bottom: 0; z-index: 1190; background: rgba(12,17,25,.18); backdrop-filter: blur(1px); -webkit-backdrop-filter: blur(1px); }
+.list-view-panel { position: fixed; z-index: 1200; left: 50%; top: var(--list-view-safe-top, 140px); bottom: 0; width: min(430px, calc(100vw - 24px)); height: auto; max-height: calc(100dvh - var(--list-view-safe-top, 140px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-bottom: 0; border-radius: 22px 22px 0 0; background: color-mix(in srgb, var(--surface-solid) 95%, var(--parchment-mid)); box-shadow: 0 -18px 52px rgba(17,24,39,.24); transform: translate(-50%, 104%); transition: transform 220ms cubic-bezier(.2,.8,.2,1); }
+.list-view-panel.is-open { transform: translate(-50%, 0); }
+.list-view-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; padding: 11px 12px 9px 16px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface-solid) 84%, transparent); }
+.list-view-header h2 { margin: 0; font: 650 21px/1.05 var(--font-heading); color: var(--accent-text); }
+.list-view-header p { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
+.list-view-close { width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%; font-size: 25px; line-height: 1; }
+.list-view-scroller { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.list-view-scroller::-webkit-scrollbar { display: none; }
+.list-view-items { position: relative; padding: 24px 12px 40vh 8px; }
+.list-view-items::before { content: ''; position: absolute; top: 0; bottom: 0; left: 29.5%; width: 2px; transform: translateX(-1px); background: color-mix(in srgb, var(--axis) 72%, transparent); }
+.list-view-row { --row-gap: 14px; position: relative; display: grid; grid-template-columns: 24% 11% 65%; align-items: start; min-height: 72px; padding-bottom: var(--row-gap); }
+.list-view-date { padding: 9px 9px 0 0; text-align: right; color: var(--accent-text); font-family: var(--font-heading); line-height: 1.05; }
+.list-view-date strong { display: block; font-size: 16px; font-weight: 680; }
+.list-view-date span { display: block; margin-top: 4px; font-family: var(--font-body); font-size: 11px; color: var(--text-muted); line-height: 1.2; }
+.list-view-rail { position: relative; min-height: 58px; }
+.list-view-rail i { position: absolute; top: 17px; left: calc(50% - 1px); width: calc(50% + 9px); height: 2px; background: var(--event-color); }
+.list-view-rail i::before { content: ''; position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--event-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--surface-solid) 90%, transparent); }
+.list-view-row.is-period .list-view-rail i::before { border-radius: 2px; height: 22px; top: -10px; }
+.list-view-card { position: relative; width: 100%; min-height: 48px; padding: 9px 10px; text-align: left; overflow: hidden; color: var(--text); background: var(--surface-solid); border: 1px solid color-mix(in srgb, var(--event-color) 65%, var(--border)); border-radius: 9px; box-shadow: 0 4px 12px rgba(21,28,38,.09); }
+.list-view-card-title { display: block; font-weight: 650; line-height: 1.25; }
+.list-view-card small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 11px; }
+html[data-visual-theme="gradient"] .list-view-card { color: white; border-color: color-mix(in srgb, var(--event-color) 78%, #08111f); background: linear-gradient(115deg, color-mix(in srgb, var(--event-color) 70%, #08111f), var(--event-color), color-mix(in srgb, var(--event-color) 58%, white)); }
+html[data-visual-theme="gradient"] .list-view-card small { color: rgba(255,255,255,.82); }
+html[data-visual-theme="flat"] .list-view-card { background: color-mix(in srgb, var(--event-color) 14%, var(--surface-solid)); color: color-mix(in srgb, var(--event-color) 72%, var(--text)); box-shadow: none; }
+html[data-visual-theme="metro"] .list-view-card { border: 0; border-left: 4px solid var(--event-color); border-radius: 0; background: transparent; box-shadow: none; color: var(--event-color); }
+html[data-visual-theme="ai"] .list-view-card { border: 1px solid transparent; background: linear-gradient(var(--surface-solid),var(--surface-solid)) padding-box, linear-gradient(145deg,#38bdf8,var(--event-color),#ec4899) border-box; box-shadow: 0 5px 16px color-mix(in srgb, var(--event-color) 15%, transparent); color: var(--event-color); }
+.list-view-row.is-anchor .list-view-card { animation: list-anchor-pulse 800ms ease; }
+@keyframes list-anchor-pulse { 0%,100% { transform: none; } 35% { transform: translateX(4px); box-shadow: 0 0 0 4px color-mix(in srgb, var(--event-color) 20%, transparent); } }
+@media (max-height: 650px) and (min-width: 700px) { .list-view-panel { width: min(430px, calc(100vw - 24px)); } .list-view-items { padding-left: 4px; padding-right: 8px; } }
+body.list-view-detail-open .list-view-panel { filter: saturate(.86) brightness(.92); }
+body.list-view-detail-open .detail-panel { position: fixed !important; z-index: 1320 !important; left: 50% !important; top: calc(var(--list-view-safe-top, 140px) + 18px) !important; right: auto !important; bottom: auto !important; width: min(390px, calc(100vw - 48px)) !important; max-height: calc(100dvh - var(--list-view-safe-top, 140px) - 36px) !important; transform: translateX(-50%) !important; box-shadow: 0 24px 70px rgba(8,12,22,.34) !important; }
+
+@media (prefers-reduced-motion: reduce) { .list-view-panel { transition: none; } .list-view-row.is-anchor .list-view-card { animation: none; } }
+
+/* v2.6.2 — compact list typography, live search, and equal-distance phone List View. */
+.list-view-header h2 { font-size: 17px; line-height: 1.1; }
+.list-view-header p { font-size: 11px; }
+.list-view-row { min-height: 62px; --row-gap: 10px; }
+.list-view-date { padding-top: 7px; }
+.list-view-date strong { font-size: 13px; font-weight: 650; }
+.list-view-date span { margin-top: 3px; font-size: 10px; }
+.list-view-rail { min-height: 50px; }
+.list-view-rail i { top: 14px; }
+.list-view-card { min-height: 42px; padding: 7px 8px; font-size: 13px; }
+.list-view-card-title { font-size: 13px; line-height: 1.2; }
+.list-view-card small { margin-top: 3px; font-size: 10px; }
+.list-view-row.is-search-dim { opacity: .22; filter: grayscale(.35); }
+.list-view-row.is-search-result .list-view-card { box-shadow: 0 0 0 2px color-mix(in srgb, var(--event-color) 28%, transparent); }
+.list-view-row.is-search-match .list-view-card { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-text) 48%, transparent), 0 8px 22px rgba(21,28,38,.16); transform: translateX(3px); }
+
+/* Phone mode keeps the same equal-distance list, fitted edge-to-edge below the controls. */
+@media (max-width: 699px) {
+  .list-view-panel {
+    width: calc(100vw - 8px);
+    max-width: 430px;
+    border-radius: 18px 18px 0 0;
+  }
+  .list-view-backdrop { background: rgba(12,17,25,.12); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .list-view-header { min-height: 54px; padding: 8px 9px 7px 12px; }
+  .list-view-close { width: 32px; min-width: 32px; height: 32px; min-height: 32px; font-size: 22px; }
+  .list-view-items { padding: 18px 8px 42vh 5px; }
+  .list-view-row { grid-template-columns: 24% 10% 66%; }
+  .list-view-items::before { left: 29%; }
+  body.list-view-detail-open .detail-panel {
+    width: calc(100vw - 20px) !important;
+    max-height: calc(100dvh - var(--list-view-safe-top, 100px) - 20px) !important;
+    top: calc(var(--list-view-safe-top, 100px) + 10px) !important;
+  }
+}
+html[data-preview-size="phone"] .list-view-panel { width: min(430px, calc(100vw - 8px)); }

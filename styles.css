@@ -22,7 +22,13 @@
   --focus: rgba(10,102,255,.19);
   --shadow-low: 0 1px 2px rgba(17,24,39,.04), 0 6px 18px rgba(17,24,39,.05);
   --shadow-float: 0 18px 50px rgba(17,24,39,.16), 0 3px 12px rgba(17,24,39,.08);
-  --paper-noise: .065;
+  --paper-noise: .075;
+  --font-heading: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  --accent-text: #6c4cf6;
+  --parchment-top: #fffaf0;
+  --parchment-mid: #f6ecd8;
+  --parchment-bottom: #eadbc0;
   background: var(--bg);
   color: var(--text);
 }
@@ -51,12 +57,17 @@
   --shadow-low: 0 1px 2px rgba(0,0,0,.25), 0 10px 28px rgba(0,0,0,.18);
   --shadow-float: 0 24px 64px rgba(0,0,0,.42), 0 4px 16px rgba(0,0,0,.32);
   --paper-noise: .055;
+  --accent-text: #a78bfa;
+  --parchment-top: #242018;
+  --parchment-mid: #1d1a15;
+  --parchment-bottom: #15130f;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 body {
   display: flex;
+  font-family: var(--font-body);
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
@@ -67,6 +78,14 @@ body {
   letter-spacing: -.008em;
 }
 
+button, input, select, textarea { font-family: var(--font-body); }
+:is(h1, h2, h3, h4, legend, .settings-section > h3, .settings-heading h2, .above-sets-label, .visible-sets-label, .field-label, label > span:first-child) {
+  font-family: var(--font-heading);
+  color: var(--accent-text);
+}
+:is(input, select, textarea, p, small, .event-label-text, .detail-panel, .tooltip, .list-view-card) {
+  font-family: var(--font-body);
+}
 button, input, select { font: inherit; }
 button, input, select { transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
 button {
@@ -162,7 +181,9 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: linear-gradient(180deg, #fffefb 0%, var(--surface-canvas) 48%, #f5f3ed 100%);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255,255,255,.46), transparent 46%),
+    linear-gradient(180deg, var(--parchment-top) 0%, var(--parchment-mid) 52%, var(--parchment-bottom) 100%);
   box-shadow: none;
   touch-action: none;
   user-select: none;
@@ -5832,3 +5853,13 @@ html[data-preview-size="phone"] .timeline-viewport.is-phone-vertical .event-labe
 .sample-layer-toggle input:checked + i::after { transform:translateX(16px); background:#fff; }
 .sample-layer-toggle input:focus-visible + i { outline:2px solid #60a5fa; outline-offset:2px; }
 .sample-layer-toggle input:disabled + i { opacity:.55; cursor:not-allowed; }
+
+/* v2.6.2 — protect the Chrona signature wordmark from global accent typography. */
+.app-header .brand-block > h1 {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif !important;
+  background: linear-gradient(90deg, #ff5a5f 0%, #ff9f0a 18%, #ffd60a 33%, #34c759 50%, #0a84ff 68%, #5e5ce6 83%, #bf5af2 100%) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+}

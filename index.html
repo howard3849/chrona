@@ -4,11 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Chrona — Interactive Timeline Explorer</title>
-  <link rel="stylesheet" href="styles.css?v=2.5.11">
-  <link rel="stylesheet" href="css/theme-colors.css?v=2.5.11">
-  <link rel="stylesheet" href="css/search.css?v=2.5.11">
-  <link rel="stylesheet" href="css/year-ruler.css?v=2.5.11">
-  <link rel="stylesheet" href="css/phone-period.css?v=2.5.11">
+  <link rel="stylesheet" href="styles.css?v=2.6.2">
+  <link rel="stylesheet" href="css/theme-colors.css?v=2.6.2">
+  <link rel="stylesheet" href="css/search.css?v=2.6.2">
+  <link rel="stylesheet" href="css/year-ruler.css?v=2.6.2">
+  <link rel="stylesheet" href="css/phone-period.css?v=2.6.2">
+  <link rel="stylesheet" href="css/list-view.css?v=2.6.2">
 </head>
 <body>
   <header class="app-header">
@@ -30,6 +31,9 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"></rect><path d="M8 20h8M12 16v4"></path></svg>
           </button>
         </div>
+        <button id="listViewToggle" class="list-view-toggle header-square-button" type="button" title="Chronological list" aria-label="Open chronological list" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v18"></path><circle cx="7" cy="6" r="1.5"></circle><circle cx="7" cy="12" r="1.5"></circle><circle cx="7" cy="18" r="1.5"></circle><path d="M11 6h8M11 12h8M11 18h8"></path></svg>
+        </button>
         <div class="search-shell">
           <button id="searchToggle" class="search-toggle header-square-button" type="button" title="Search timeline" aria-label="Open search" aria-expanded="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
@@ -139,9 +143,24 @@
     <section class="settings-section settings-version-section">
       <div class="settings-version-row">
         <span data-i18n="settings.version">Version</span>
-        <code id="appVersion">v2.5.11</code>
+        <code id="appVersion">v2.6.2</code>
       </div>
     </section>
+  </aside>
+
+
+  <div id="listViewBackdrop" class="list-view-backdrop" hidden></div>
+  <aside id="listViewPanel" class="list-view-panel" hidden role="dialog" aria-modal="false" aria-labelledby="listViewTitle">
+    <header class="list-view-header">
+      <div>
+        <h2 id="listViewTitle">Chronological List</h2>
+        <p id="listViewSummary">Visible timeline events</p>
+      </div>
+      <button id="listViewClose" class="list-view-close" type="button" aria-label="Close chronological list">×</button>
+    </header>
+    <div id="listViewScroller" class="list-view-scroller">
+      <div id="listViewItems" class="list-view-items"></div>
+    </div>
   </aside>
 
   <section class="toolbar">
@@ -205,8 +224,8 @@
   </template>
 
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script defer src="version.js?v=2.5.11"></script>
-  <script defer src="sample-data.js?v=2.5.11"></script>
-  <script defer src="timeline.js?v=2.5.11"></script>
+  <script defer src="version.js?v=2.6.2"></script>
+  <script defer src="sample-data.js?v=2.6.2"></script>
+  <script defer src="timeline.js?v=2.6.2"></script>
 </body>
 </html>

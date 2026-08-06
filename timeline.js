@@ -70,7 +70,9 @@
   const searchResultCount = document.getElementById('searchResultCount');
   const searchClose = document.getElementById('searchClose');
   const appHeader = document.querySelector('.app-header');
+  const toolbar = document.querySelector('.toolbar');
   const detailPanel = document.getElementById('detailPanel');
+  const detailPanelHome = detailPanel?.parentElement;
   const detailContent = document.getElementById('detailContent');
   const detailClose = document.getElementById('detailClose');
   const overviewCanvas = document.getElementById('overviewCanvas');
@@ -89,6 +91,13 @@
   const exportWorkbookButton = document.getElementById('exportWorkbook');
   const workbookTransferStatus = document.getElementById('workbookTransferStatus');
   const includeSampleTimelineInput = document.getElementById('includeSampleTimeline');
+  const listViewToggle = document.getElementById('listViewToggle');
+  const listViewBackdrop = document.getElementById('listViewBackdrop');
+  const listViewPanel = document.getElementById('listViewPanel');
+  const listViewClose = document.getElementById('listViewClose');
+  const listViewScroller = document.getElementById('listViewScroller');
+  const listViewItems = document.getElementById('listViewItems');
+  const listViewSummary = document.getElementById('listViewSummary');
 
   const state = {
     events: [],
@@ -159,7 +168,9 @@
     overviewDragStartViewEnd: 0,
     overviewRefreshTimer: null,
     overviewCategorySnapshot: new Set(),
-    overviewBounds: null
+    overviewBounds: null,
+    listViewOpen: false,
+    listViewAnchorId: null
   };
 
   const UI_STRINGS = {
@@ -705,6 +716,9 @@
   settingsToggle.addEventListener('click', () => toggleSettings());
   settingsClose.addEventListener('click', closeSettings);
   settingsBackdrop.addEventListener('click', closeSettings);
+  listViewToggle?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); state.listViewOpen ? closeListView() : openListView(); });
+  listViewClose?.addEventListener('click', closeListView);
+  listViewBackdrop?.addEventListener('click', closeListView);
   onboardingUseSample?.addEventListener('click', dismissOnboardingNotice);
   onboardingAddSheet?.addEventListener('click', () => {
     dismissOnboardingNotice();
@@ -734,7 +748,7 @@
       sheetUrlInput?.focus();
     }
   });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeSettings(); closeAboveSetsMenu(); } });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeSettings(); closeAboveSetsMenu(); closeListView(); } });
   systemTheme.addEventListener?.('change', () => {
     if ((localStorage.getItem('timeline-theme') || 'auto') === 'auto') {
       applyTheme('auto', false);
@@ -1198,7 +1212,17 @@
 
   function rowsToObjects(rows) {
     const headers = rows[0].map(h => h.trim());
-    return rows.slice(1).map(row => Object.fromEntries(headers.map((h, i) => [h, row[i] ?? ''])));
+    const duplicates = headers.filter((header, index) => header && headers.indexOf(header) !== index);
+    if (duplicates.length) console.warn('Duplicate timeline headers detected; the leftmost populated value wins:', [...new Set(duplicates)]);
+    return rows.slice(1).map(row => {
+      const object = {};
+      headers.forEach((header, index) => {
+        if (!header) return;
+        const value = row[index] ?? '';
+        if (!(header in object) || (!String(object[header]).trim() && String(value).trim())) object[header] = value;
+      });
+      return object;
+    });
   }
 
 
@@ -1352,7 +1376,10 @@
   }
 
   function formatYear(value) {
-    const year = Math.round(value);
+    // Timeline values contain a fractional month/day component. Rounding made
+    // dates after midyear appear as the following year (for example Aug 9,
+    // 1968 displayed as 1969). The integer year is always the floor value.
+    const year = Math.floor(Number(value));
     if (year < 0) return `${Math.abs(year)} BCE`;
     return `${year}`;
   }
@@ -1605,6 +1632,7 @@
     buildFilters();
     scheduleRender();
     scheduleOverviewRefresh();
+    if (state.listViewOpen) renderListView(true);
   }
 
   function scheduleOverviewRefresh() {
@@ -2106,6 +2134,134 @@
     return escapeHtml(value).replace(/`/g, '&#96;');
   }
 
+
+  function listVisibleEvents() {
+    return state.events
+      .filter(event => event.elementType !== 'Title' && state.enabledCategories.has(event.category))
+      .sort((a, b) => a.start - b.start || (a.end ?? a.start) - (b.end ?? b.start) || a.headline.localeCompare(b.headline));
+  }
+
+  function listAnchorEvent(events, focusTime) {
+    const containingPeriods = events.filter(event => event.elementType === 'Period' && Number.isFinite(event.end) && event.start <= focusTime && event.end >= focusTime);
+    if (containingPeriods.length) {
+      return containingPeriods.sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+    }
+    return events.reduce((best, event) => {
+      const eventTime = Number.isFinite(event.end) && event.end > event.start ? (event.start + event.end) / 2 : event.start;
+      const distance = Math.abs(eventTime - focusTime);
+      if (!best || distance < best.distance) return { event, distance };
+      return best;
+    }, null)?.event || null;
+  }
+
+  function listDateMarkup(event) {
+    const display = localizedDisplayDate(event) || event.displayDate || formatYear(event.start);
+    const year = formatYear(event.start);
+    const secondary = display === year ? '' : `<span>${escapeHtml(display)}</span>`;
+    return `<strong>${escapeHtml(year)}</strong>${secondary}`;
+  }
+
+  function renderListView(reanchor = false) {
+    if (!state.listViewOpen || !listViewItems) return;
+    const events = listVisibleEvents();
+    listViewSummary.textContent = `${events.length} event${events.length === 1 ? '' : 's'} · ${state.enabledCategories.size} visible group${state.enabledCategories.size === 1 ? '' : 's'}`;
+    listViewItems.replaceChildren();
+    const fragment = document.createDocumentFragment();
+    for (const event of events) {
+      const row = document.createElement('article');
+      const searchClass = state.searchQuery.trim()
+        ? (isActiveSearchResult(event) ? ' is-search-match' : (eventMatchesSearch(event) ? ' is-search-result' : ' is-search-dim'))
+        : '';
+      row.className = `list-view-row ${event.elementType === 'Period' ? 'is-period' : 'is-event'}${searchClass}`;
+      row.dataset.eventId = event.id;
+      row.style.setProperty('--event-color', event.color);
+      row.innerHTML = `
+        <div class="list-view-date">${listDateMarkup(event)}</div>
+        <div class="list-view-rail" aria-hidden="true"><i></i></div>
+        <button class="list-view-card" type="button">
+          <span class="list-view-card-title">${escapeHtml(event.headline)}</span>
+          ${event.categoryLabel || event.category ? `<small>${escapeHtml(event.categoryLabel || event.category)}</small>` : ''}
+        </button>`;
+      row.querySelector('.list-view-card').addEventListener('click', () => {
+        const panelRect = listViewPanel.getBoundingClientRect();
+        document.body.classList.add('list-view-detail-open');
+        if (detailPanel && detailPanel.parentElement !== document.body) document.body.appendChild(detailPanel);
+        openDetails(event, panelRect.left + panelRect.width / 2, panelRect.top + 28);
+      });
+      fragment.appendChild(row);
+    }
+    listViewItems.appendChild(fragment);
+    if (reanchor || !state.listViewAnchorId || !events.some(event => event.id === state.listViewAnchorId)) {
+      const focusTime = (state.viewStart + state.viewEnd) / 2;
+      state.listViewAnchorId = listAnchorEvent(events, focusTime)?.id || null;
+    }
+    if (reanchor) scrollListViewToAnchor(true);
+  }
+
+  function scrollListViewToAnchor(pulse = false) {
+    const anchorId = state.listViewAnchorId;
+    if (!anchorId || !listViewScroller || !listViewItems) return;
+    const position = () => {
+      const anchor = listViewItems.querySelector(`[data-event-id="${CSS.escape(anchorId)}"]`);
+      if (!anchor || !listViewScroller.clientHeight) return false;
+      const top = anchor.offsetTop - (listViewScroller.clientHeight - anchor.offsetHeight) / 2;
+      listViewScroller.scrollTop = Math.max(0, top);
+      if (pulse) {
+        anchor.classList.remove('is-anchor');
+        void anchor.offsetWidth;
+        anchor.classList.add('is-anchor');
+        setTimeout(() => anchor.classList.remove('is-anchor'), 800);
+      }
+      return true;
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!position()) setTimeout(position, 240);
+      });
+    });
+  }
+
+  function syncListViewSafeTop() {
+    const toolbarBottom = toolbar?.getBoundingClientRect().bottom || appHeader?.getBoundingClientRect().bottom || 0;
+    const safeTop = Math.max(8, Math.round(toolbarBottom + 8));
+    document.documentElement.style.setProperty('--list-view-safe-top', `${safeTop}px`);
+  }
+
+  function openListView() {
+    if (!listViewPanel || !listViewBackdrop) return;
+    closeSettings();
+    closeSearchControl();
+    syncListViewSafeTop();
+    state.listViewOpen = true;
+    state.listViewAnchorId = null;
+    listViewPanel.hidden = false;
+    listViewBackdrop.hidden = false;
+    document.body.classList.add('list-view-is-open');
+    listViewToggle?.setAttribute('aria-expanded', 'true');
+    listViewToggle?.classList.add('is-active');
+    renderListView(true);
+    requestAnimationFrame(() => {
+      listViewPanel.classList.add('is-open');
+      scrollListViewToAnchor(true);
+    });
+  }
+
+  function closeListView() {
+    if (!state.listViewOpen) return;
+    state.listViewOpen = false;
+    if (document.body.classList.contains('list-view-detail-open')) closeDetails();
+    document.body.classList.remove('list-view-detail-open');
+    listViewPanel?.classList.remove('is-open');
+    listViewToggle?.setAttribute('aria-expanded', 'false');
+    listViewToggle?.classList.remove('is-active');
+    document.body.classList.remove('list-view-is-open');
+    setTimeout(() => {
+      if (state.listViewOpen) return;
+      if (listViewPanel) listViewPanel.hidden = true;
+      if (listViewBackdrop) listViewBackdrop.hidden = true;
+    }, 220);
+  }
+
   function scheduleRender() {
     if (state.renderQueued) return;
     state.renderQueued = true;
@@ -2532,6 +2688,7 @@
     drawOverview();
     updateLaneLegends();
     syncZoomDial();
+    if (state.listViewOpen) { syncListViewSafeTop(); renderListView(false); }
   }
 
   function drawMobileYearCursor(width, height) {
@@ -2677,13 +2834,23 @@
   }
 
   function drawBackground(width, height) {
-    const top = cssVar('--surface-solid', '#ffffff');
-    const bottom = cssVar('--surface-soft', '#f3f5f7');
+    const top = cssVar('--parchment-top', '#fffaf0');
+    const middle = cssVar('--parchment-mid', '#f6ecd8');
+    const bottom = cssVar('--parchment-bottom', '#eadbc0');
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
     gradient.addColorStop(0, top);
-    gradient.addColorStop(0.54, top);
+    gradient.addColorStop(0.5, middle);
     gradient.addColorStop(1, bottom);
     ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+
+    // A broad highlight preserves the dimensional gradient while keeping the
+    // canvas recognizably parchment rather than flat beige.
+    const glow = ctx.createRadialGradient(width * .5, 0, 0, width * .5, 0, Math.max(width, height));
+    glow.addColorStop(0, 'rgba(255,255,255,.34)');
+    glow.addColorStop(.55, 'rgba(255,255,255,.05)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
     ctx.fillRect(0, 0, width, height);
   }
 
@@ -3785,6 +3952,14 @@
   function positionDetailPanel(clientX, clientY) {
     if (detailPanel.hidden) return;
 
+    if (state.listViewOpen && document.body.classList.contains('list-view-detail-open')) {
+      detailPanel.style.left = '50%';
+      detailPanel.style.top = 'calc(var(--list-view-safe-top, 140px) + 18px)';
+      detailPanel.style.right = 'auto';
+      detailPanel.style.bottom = 'auto';
+      return;
+    }
+
     const viewportRect = viewport.getBoundingClientRect();
     const gap = 12;
     const edge = 12;
@@ -3870,6 +4045,8 @@
     state.detailShowOriginal = false;
     detailPanel.classList.remove('is-opening');
     detailPanel.hidden = true;
+    document.body.classList.remove('list-view-detail-open');
+    if (detailPanelHome && detailPanel.parentElement !== detailPanelHome) detailPanelHome.appendChild(detailPanel);
 
     scheduleRender();
     viewport.focus();
@@ -3915,6 +4092,7 @@
     state.searchQuery = searchInput.value;
     state.searchMatchIndex = -1;
     updateSearchResults();
+    if (state.listViewOpen) renderListView(false);
     scheduleRender();
   }
 
@@ -3927,6 +4105,13 @@
       state.searchMatches.length;
 
     const event = state.searchMatches[state.searchMatchIndex];
+    if (state.listViewOpen) {
+      state.listViewAnchorId = event.id;
+      renderListView(false);
+      scrollListViewToAnchor(true);
+      searchResultCount.textContent = `${state.searchMatchIndex + 1}/${state.searchMatches.length}`;
+      return;
+    }
     const currentSpan = state.viewEnd - state.viewStart;
 
     if (isEraBlock(event)) {

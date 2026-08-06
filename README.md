@@ -43,6 +43,14 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.6.2
+
+Refined the equal-distance List View across Mac, iPad, and iPhone. The phone-sized drawer reanchors to the date currently centered on the plotted timeline every time it opens, uses compact Chrona-sized typography, participates in Search, and keeps the detail pane above the still-open list. The Chrona signature logo retains its AI rainbow treatment.
+
+### 2.6.0
+
+Added a theme-aware chronological List View that presents all visible events and periods at equal vertical spacing. The bottom-sheet overlay opens anchored to the date currently centered in the plotted timeline, keeps all event cards to the right of a vertical rail, and follows existing group visibility. This release also fixes midyear events displaying the following year, establishes New York-style accent typography for headings and field labels, uses SF Pro-style body typography, and strengthens the parchment-gradient timeline canvas.
+
 ### 2.5.11
 
 Fixed human translation-column priority. Chrona now recognizes equivalent Chinese language tags such as `zh-TW` and `zh-Hant`, always prefers populated human-authored columns such as `Title [zh-TW]` and `Description [zh-TW]`, and uses machine translation only when no matching human text is available.
