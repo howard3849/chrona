@@ -43,6 +43,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.6.3
+
+Corrected responsive overlays. The equal-distance List View now fits the actual phone viewport, removes group names from cards, and limits titles to two lines. Settings now opens above the List View, becomes a true full-screen panel on iPhone and iPad, and hides scrollbars on its scrollable surface.
+
 ### 2.6.2
 
 Refined the equal-distance List View across Mac, iPad, and iPhone. The phone-sized drawer reanchors to the date currently centered on the plotted timeline every time it opens, uses compact Chrona-sized typography, participates in Search, and keeps the detail pane above the still-open list. The Chrona signature logo retains its AI rainbow treatment.

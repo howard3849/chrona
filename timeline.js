@@ -2180,7 +2180,6 @@
         <div class="list-view-rail" aria-hidden="true"><i></i></div>
         <button class="list-view-card" type="button">
           <span class="list-view-card-title">${escapeHtml(event.headline)}</span>
-          ${event.categoryLabel || event.category ? `<small>${escapeHtml(event.categoryLabel || event.category)}</small>` : ''}
         </button>`;
       row.querySelector('.list-view-card').addEventListener('click', () => {
         const panelRect = listViewPanel.getBoundingClientRect();
@@ -2224,7 +2223,11 @@
   function syncListViewSafeTop() {
     const toolbarBottom = toolbar?.getBoundingClientRect().bottom || appHeader?.getBoundingClientRect().bottom || 0;
     const safeTop = Math.max(8, Math.round(toolbarBottom + 8));
+    const viewportRect = viewport?.getBoundingClientRect();
+    const availableWidth = Math.max(280, Math.round(viewportRect?.width || window.innerWidth));
+    const listWidth = Math.min(430, Math.max(280, availableWidth - 8));
     document.documentElement.style.setProperty('--list-view-safe-top', `${safeTop}px`);
+    document.documentElement.style.setProperty('--list-view-width', `${listWidth}px`);
   }
 
   function openListView() {
