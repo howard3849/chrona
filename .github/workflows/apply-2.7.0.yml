@@ -61,7 +61,7 @@ jobs:
           test "$(cat VERSION)" = "2.7.0"
           grep -q "window.CHRONA_VERSION = '2.7.0'" version.js
           grep -q '<code id="appVersion">v2.7.0</code>' index.html
-          if grep -RIn --exclude-dir=.git --exclude='README.md' '?v=2.6.3' .; then
+          if grep -RIn --exclude-dir=.git --exclude-dir=.github --exclude-dir=tools --exclude='README.md' '?v=2.6.3' .; then
             echo 'Old cache-busting version remains' >&2
             exit 1
           fi
