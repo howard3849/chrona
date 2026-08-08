@@ -1,0 +1,79 @@
+name: Apply Chrona 2.7.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'tools/apply-2.7.0.mjs'
+      - 'tools/update-sample-importance.py'
+      - '.github/workflows/apply-2.7.0.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install workbook dependency
+        run: python -m pip install --disable-pip-version-check openpyxl
+      - name: Apply source migration
+        run: node tools/apply-2.7.0.mjs
+      - name: Normalize sample workbook Importance
+        run: python tools/update-sample-importance.py
+      - name: Validate JavaScript
+        run: |
+          node --check timeline.js
+          node --check sample-data.js
+          node --check version.js
+      - name: Validate workbook Importance values
+        run: |
+          python - <<'PY'
+          from openpyxl import load_workbook
+          wb=load_workbook('chrona-sample-timeline.xlsx', read_only=True, data_only=False)
+          ws=wb['Timeline Data']
+          headers={c.value:c.column for c in ws[1] if c.value}
+          col=headers['Importance']
+          bad=[]
+          for r in range(2,ws.max_row+1):
+              v=ws.cell(r,col).value
+              if v is None or str(v).strip()=='' :
+                  continue
+              if str(v).strip() not in {'Major','Normal','Minor'}:
+                  bad.append((r,v))
+          if bad:
+              raise SystemExit(f'Invalid Importance values: {bad}')
+          print('Workbook Importance values valid')
+          PY
+      - name: Validate release synchronization
+        run: |
+          test "$(cat VERSION)" = "2.7.0"
+          grep -q "window.CHRONA_VERSION = '2.7.0'" version.js
+          grep -q '<code id="appVersion">v2.7.0</code>' index.html
+          if grep -RIn --exclude-dir=.git --exclude='README.md' '?v=2.6.3' .; then
+            echo 'Old cache-busting version remains' >&2
+            exit 1
+          fi
+          grep -q '### 2.7.0' README.md
+          if grep -n 'Importance.*Medium\|"Importance":"Medium"' timeline.js sample-data.js; then
+            echo 'Legacy Medium remains in runtime/sample importance data' >&2
+            exit 1
+          fi
+      - name: Commit and push Chrona 2.7.0
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add timeline.js sample-data.js chrona-sample-timeline.xlsx VERSION version.js index.html README.md
+          git commit -m 'Release Chrona v2.7.0: priority lanes sticky axis radar sync'
+          git push origin main
