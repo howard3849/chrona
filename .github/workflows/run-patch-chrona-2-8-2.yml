@@ -3,8 +3,6 @@ name: Run Chrona 2.8.2 patch
 on:
   push:
     branches: [dev]
-    paths:
-      - 'tools/patch_chrona_2_8_2.py'
 
 permissions:
   contents: write
@@ -36,7 +34,7 @@ jobs:
       - name: Commit patched Chrona
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+howard3849@users.noreply.github.com"
           git add timeline.js styles.css index.html VERSION version.js README.md
           git commit -m "Chrona 2.8.2: foreground axis animated clusters radar geometry"
           git push origin dev
