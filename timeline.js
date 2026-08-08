@@ -26,6 +26,9 @@
   const GROUP_LANE_HEIGHT = 132;
   const GROUP_LANE_AXIS_GAP = 24;
   const GROUP_LANE_LABEL_INSET = 10;
+  const AXIS_STICKY_TOP_INSET = 31;
+  const AXIS_STICKY_BOTTOM_INSET = 31;
+  const GROUP_LANE_EXPAND_STEP = 34;
 
   const DETAILS_ENABLED = true;
 
@@ -144,6 +147,7 @@
     pendingEventYears: [],
     pendingLeaders: [],
     pendingOverflow: [],
+    expandedGroupHeights: new Map(),
     renderQueued: false,
     hitTargets: [],
     selectedEvent: null,
@@ -1553,6 +1557,7 @@
     buildAboveSetsMenu();
     state.overviewCategorySnapshot = new Set(state.enabledCategories);
     state.overviewBounds = null;
+    state.expandedGroupHeights.clear();
     const times = state.events.flatMap(e => [e.start, e.end]).filter(v => v != null);
     state.minTime = Math.min(...times);
     state.maxTime = Math.max(...times);
@@ -2764,7 +2769,7 @@
     drawAxis(rect.width, axisY);
     // Event/period lanes continue to move with the unclamped content axis while
     // the year axis itself sticks to the nearest canvas edge.
-    drawEvents(rect.width, rect.height, contentAxisY);
+    drawEvents(rect.width, rect.height, contentAxisY, axisY);
     drawEventYears();
     drawOverflowCues(rect.width, rect.height);
     drawTicks(rect.width, axisY);
@@ -3024,39 +3029,53 @@
     return Number.isFinite(event.end) && event.end > event.start;
   }
 
+  function groupLaneHeight(category) {
+    return Math.max(GROUP_LANE_HEIGHT, Number(state.expandedGroupHeights.get(category)) || GROUP_LANE_HEIGHT);
+  }
+
   function groupLaneLayout(axisY) {
-    // Preserve source/config order so a group never jumps to a different vertical
-    // lane merely because the time window changes. Primary groups stack upward;
-    // reference groups stack downward. Every group receives the same fixed height.
+    // Preserve source/config order so groups never jump while panning. A group
+    // starts at the fixed preset height and grows only after its overflow
+    // disclosure control is explicitly activated.
     const enabledGroups = [...state.categories.keys()].filter(name => state.enabledCategories.has(name));
     const primary = enabledGroups.filter(name => isPrimaryCategory(name));
     const reference = enabledGroups.filter(name => !isPrimaryCategory(name));
     const bands = new Map();
 
+    let primaryCursor = axisY - GROUP_LANE_AXIS_GAP;
     primary.forEach((category, index) => {
-      const bottom = axisY - GROUP_LANE_AXIS_GAP - index * GROUP_LANE_HEIGHT;
+      const laneHeight = groupLaneHeight(category);
+      const bottom = primaryCursor;
+      const top = bottom - laneHeight;
       bands.set(category, {
         category,
         isAbove: true,
         index,
-        top: bottom - GROUP_LANE_HEIGHT,
+        height: laneHeight,
+        top,
         bottom,
         near: bottom,
-        far: bottom - GROUP_LANE_HEIGHT
+        far: top
       });
+      primaryCursor = top;
     });
 
+    let referenceCursor = axisY + GROUP_LANE_AXIS_GAP;
     reference.forEach((category, index) => {
-      const top = axisY + GROUP_LANE_AXIS_GAP + index * GROUP_LANE_HEIGHT;
+      const laneHeight = groupLaneHeight(category);
+      const top = referenceCursor;
+      const bottom = top + laneHeight;
       bands.set(category, {
         category,
         isAbove: false,
         index,
+        height: laneHeight,
         top,
-        bottom: top + GROUP_LANE_HEIGHT,
+        bottom,
         near: top,
-        far: top + GROUP_LANE_HEIGHT
+        far: bottom
       });
+      referenceCursor = bottom;
     });
 
     return bands;
@@ -3104,7 +3123,7 @@
     ctx.restore();
   }
 
-  function drawEvents(width, height, axisY) {
+  function drawEvents(width, height, contentAxisY, displayAxisY = contentAxisY) {
     // Pack against the complete enabled data set, not just the current viewport.
     // Group membership is the first layout boundary: each group owns a fixed
     // vertical band, then Importance decides which records win space inside it.
@@ -3112,20 +3131,20 @@
       event.elementType !== 'Title' && state.enabledCategories.has(event.category)
     );
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
-    const bands = groupLaneLayout(axisY);
+    const bands = groupLaneLayout(contentAxisY);
     drawGroupLaneBands(width, height, bands);
 
     const pointLaneCounts = new Map();
     for (const band of bands.values()) {
       const groupEvents = candidates.filter(event => event.category === band.category);
       const points = groupEvents.filter(event => event.elementType !== 'Period');
-      const pointLaneCount = drawPointRows(points, width, height, axisY, band.isAbove, threshold, band);
+      const pointLaneCount = drawPointRows(points, width, height, displayAxisY, band.isAbove, threshold, band);
       pointLaneCounts.set(band.category, pointLaneCount);
     }
 
     // Connector lines are painted before period blocks so periods naturally
     // occlude unrelated leaders, matching the pre-recovery renderer behavior.
-    drawLeaderLines(axisY);
+    drawLeaderLines(displayAxisY);
     state.pendingLeadersDrawn = true;
 
     for (const band of bands.values()) {
@@ -3136,7 +3155,7 @@
         periods,
         width,
         height,
-        axisY,
+        contentAxisY,
         threshold,
         band.isAbove,
         pointLaneCounts.get(band.category) || 0,
@@ -3170,7 +3189,7 @@
     );
     const laneIntervals = [];
     const maxLabelLanes = band
-      ? Math.max(0, Math.floor((GROUP_LANE_HEIGHT - 26) / 34))
+      ? Math.max(0, Math.floor(((band.height || GROUP_LANE_HEIGHT) - 26) / 34))
       : isAbove
         ? Math.max(0, Math.floor((axisY - 60) / 34) + 1)
         : Math.max(0, Math.floor((height - axisY - 65) / 34) + 1);
@@ -3480,10 +3499,16 @@
       time: Number(event.start),
       isAbove: Boolean(isAbove),
       category: event.category,
-      cueY: band
-        ? (isAbove ? band.top + 2 : band.bottom - 15)
-        : null
+      boundaryY: band ? (isAbove ? band.top : band.bottom) : null
     });
+  }
+
+  function expandOverflowGroup(category, hiddenCount) {
+    if (!category) return;
+    const current = groupLaneHeight(category);
+    const extra = Math.max(GROUP_LANE_EXPAND_STEP * 2, Math.max(1, hiddenCount) * GROUP_LANE_EXPAND_STEP);
+    state.expandedGroupHeights.set(category, current + extra);
+    scheduleRender();
   }
 
   function drawOverflowCues(width, height) {
@@ -3493,6 +3518,7 @@
 
     for (const item of state.pendingOverflow) {
       if (item.x < -8 || item.x > width + 8) continue;
+      if (!Number.isFinite(item.boundaryY)) continue;
       const bucket = Math.round(item.x / bucketSize);
       const key = `${item.isAbove ? 'above' : 'below'}:${item.category || ''}:${bucket}`;
       if (!clusters.has(key)) clusters.set(key, []);
@@ -3501,46 +3527,61 @@
 
     for (const items of clusters.values()) {
       if (!items.length) continue;
+      const boundaryY = items[0].boundaryY;
+      // The disclosure belongs to the group boundary. Once that boundary
+      // scrolls out of view, its control scrolls out too; it never sticks to
+      // the canvas edge or competes with the sticky time axis.
+      if (boundaryY < 0 || boundaryY > height) continue;
+
       const x = items.reduce((sum, item) => sum + item.x, 0) / items.length;
       const time = items.reduce((sum, item) => sum + item.time, 0) / items.length;
-      const isAbove = items[0].isAbove;
-      const cueY = items.find(item => Number.isFinite(item.cueY))?.cueY;
+      const category = items[0].category || '';
+      const color = items[0].event?.color || categoryColor(category);
+      const cueWidth = 42;
+      const cueHeight = 20;
       const cue = document.createElement('button');
       cue.type = 'button';
       cue.className = 'timeline-overflow-cue';
-      cue.setAttribute('aria-label', `${items.length} more timeline items near ${formatYear(time)}`);
-      cue.title = `${items.length} more timeline item${items.length === 1 ? '' : 's'}`;
+      cue.setAttribute('aria-label', `Expand ${category || 'group'} to show ${items.length} more timeline items near ${formatYear(time)}`);
+      cue.title = `Show ${items.length} more in ${category || 'this group'}`;
       cue.style.cssText = [
         'position:absolute',
-        'width:24px',
-        'height:13px',
-        'padding:0',
+        `width:${cueWidth}px`,
+        `height:${cueHeight}px`,
+        'padding:0 7px',
         'margin:0',
-        'border:0',
-        'background:transparent',
+        `border:1px solid ${colorWithAlpha(color, .48)}`,
+        'border-radius:999px',
+        'background:color-mix(in srgb, var(--surface-solid, #ffffff) 88%, transparent)',
+        'backdrop-filter:blur(8px)',
+        '-webkit-backdrop-filter:blur(8px)',
+        `color:${color}`,
+        'box-shadow:0 2px 8px rgba(15,23,42,.12)',
         'cursor:pointer',
         'z-index:8',
-        `left:${Math.round(Math.max(0, Math.min(width - 24, x - 12)))}px`,
-        `top:${Math.round(Math.max(2, Math.min(height - 15, Number.isFinite(cueY) ? cueY : (isAbove ? 2 : height - 15))))}px`
+        'display:flex',
+        'align-items:center',
+        'justify-content:center',
+        'gap:5px',
+        `left:${Math.round(Math.max(0, Math.min(width - cueWidth, x - cueWidth / 2)))}px`,
+        `top:${Math.round(boundaryY - cueHeight / 2)}px`
       ].join(';');
-      cue.innerHTML = `<svg viewBox="0 0 24 13" width="24" height="13" aria-hidden="true">
-        <path d="M2 2.5 L12 10.5 L22 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path>
-        <text x="12" y="6.6" text-anchor="middle" dominant-baseline="middle" font-size="7.4" font-weight="700" fill="currentColor">${items.length}</text>
-      </svg>`;
+      // Premium editorial disclosure pattern: a small caret plus a separate,
+      // legible count. The number never sits in or touches the caret valley.
+      cue.innerHTML = `<svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true" focusable="false"><path d="M1 1 L5 5 L9 1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font:700 10px/1 -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;min-width:10px;text-align:center">${items.length}</span>`;
       cue.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        const span = Math.max(MIN_VISIBLE_YEARS, state.viewEnd - state.viewStart);
-        const ratio = Math.max(0, Math.min(1, (time - state.viewStart) / span));
-        zoomAt(ratio, 0.45);
+        expandOverflowGroup(category, items.length);
       });
       labelLayer.appendChild(cue);
     }
   }
 
   function stickyAxisY(height, rawAxisY = height * state.axisYRatio) {
-    const edge = document.documentElement.dataset.theme === 'dark' ? 1.5 : 1;
-    return Math.max(edge, Math.min(Math.max(edge, height - edge), rawAxisY));
+    const top = Math.min(AXIS_STICKY_TOP_INSET, Math.max(1, height / 2));
+    const bottom = Math.max(top, height - Math.min(AXIS_STICKY_BOTTOM_INSET, Math.max(1, height / 2)));
+    return Math.max(top, Math.min(bottom, rawAxisY));
   }
 
   function mixHex(colorA, colorB, amount) {
@@ -4638,7 +4679,7 @@
       // itself becomes sticky at a canvas edge.
       const verticalRange = Math.max(0.0001, DESKTOP_AXIS_MAX_RATIO - DESKTOP_AXIS_MIN_RATIO);
       const verticalPosition = Math.max(0, Math.min(1,
-        (state.axisYRatio - DESKTOP_AXIS_MIN_RATIO) / verticalRange
+        (DESKTOP_AXIS_MAX_RATIO - state.axisYRatio) / verticalRange
       ));
       const verticalWindowFraction = 1 / (verticalRange + 1);
       const verticalWindowHeight = Math.max(10, rect.height * verticalWindowFraction);

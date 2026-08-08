@@ -45,6 +45,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.1
+
+Refined the reconstructed group-lane system: the complete timeline-axis strip now remains readable when pinned to the top or bottom edge, including regular tick labels and event-year anchors. Overflow disclosure controls now live on their actual group boundaries and scroll away with the group instead of sticking to the viewport; activating one expands only that group beyond its preset height. The disclosure uses a compact editorial caret-and-count pill for legibility. Corrected the radar lens vertical mapping so it follows the section of timeline content actually exposed by vertical navigation.
+
 ### 2.8.0
 
 Restored fixed-height per-group timeline lanes on desktop/tablet. Each enabled group now owns a stable vertical band in source/config order, so horizontal panning cannot collapse different groups back into one shared packing pool. Point labels and periods pack only inside their group band; Major → Normal → Minor remains the deterministic space priority, overflow cues are clustered per group and appear at that lane’s outer edge, and overlapping duration spans receive group-aware micro-offsets. The v2.7 sticky central axis and radar synchronization remain intact.
