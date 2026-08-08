@@ -45,6 +45,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.0
+
+Restored fixed-height per-group timeline lanes on desktop/tablet. Each enabled group now owns a stable vertical band in source/config order, so horizontal panning cannot collapse different groups back into one shared packing pool. Point labels and periods pack only inside their group band; Major → Normal → Minor remains the deterministic space priority, overflow cues are clustered per group and appear at that lane’s outer edge, and overlapping duration spans receive group-aware micro-offsets. The v2.7 sticky central axis and radar synchronization remain intact.
+
 ### 2.7.0
 
 Added stable priority-aware lane packing using Major → Normal → Minor, with blank Importance treated as Normal and legacy Medium values normalized. Hidden lane items now surface as compact numbered chevron overflow cues that zoom into their cluster instead of disappearing silently. The desktop/tablet year axis now sticks to the top or bottom canvas edge while event lanes continue to scroll, and the radar focus frame now tracks both the visible time range and vertical lane pan across responsive layouts.

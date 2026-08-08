@@ -23,6 +23,9 @@
   const DESKTOP_AXIS_MAX_RATIO = 2.5;
   const MIN_VISIBLE_YEARS = 0.08;
   const MAX_VISIBLE_YEARS = 12000;
+  const GROUP_LANE_HEIGHT = 132;
+  const GROUP_LANE_AXIS_GAP = 24;
+  const GROUP_LANE_LABEL_INSET = 10;
 
   const DETAILS_ENABLED = true;
 
@@ -3021,27 +3024,125 @@
     return Number.isFinite(event.end) && event.end > event.start;
   }
 
+  function groupLaneLayout(axisY) {
+    // Preserve source/config order so a group never jumps to a different vertical
+    // lane merely because the time window changes. Primary groups stack upward;
+    // reference groups stack downward. Every group receives the same fixed height.
+    const enabledGroups = [...state.categories.keys()].filter(name => state.enabledCategories.has(name));
+    const primary = enabledGroups.filter(name => isPrimaryCategory(name));
+    const reference = enabledGroups.filter(name => !isPrimaryCategory(name));
+    const bands = new Map();
+
+    primary.forEach((category, index) => {
+      const bottom = axisY - GROUP_LANE_AXIS_GAP - index * GROUP_LANE_HEIGHT;
+      bands.set(category, {
+        category,
+        isAbove: true,
+        index,
+        top: bottom - GROUP_LANE_HEIGHT,
+        bottom,
+        near: bottom,
+        far: bottom - GROUP_LANE_HEIGHT
+      });
+    });
+
+    reference.forEach((category, index) => {
+      const top = axisY + GROUP_LANE_AXIS_GAP + index * GROUP_LANE_HEIGHT;
+      bands.set(category, {
+        category,
+        isAbove: false,
+        index,
+        top,
+        bottom: top + GROUP_LANE_HEIGHT,
+        near: top,
+        far: top + GROUP_LANE_HEIGHT
+      });
+    });
+
+    return bands;
+  }
+
+  function drawGroupLaneBands(width, height, bands) {
+    if (!bands.size) return;
+    const dark = document.documentElement.dataset.theme === 'dark';
+    ctx.save();
+    ctx.font = '650 10px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
+    ctx.textBaseline = 'top';
+
+    for (const band of bands.values()) {
+      const category = state.categories.get(band.category);
+      const color = category?.color || stableGroupColor(band.category);
+      const visibleTop = Math.max(0, band.top);
+      const visibleBottom = Math.min(height, band.bottom);
+      if (visibleBottom <= 0 || visibleTop >= height) continue;
+
+      // A restrained tint and far-edge separator make each group read as its own
+      // lane without turning the timeline into a grid of heavy boxes.
+      ctx.fillStyle = colorWithAlpha(color, dark ? 0.035 : 0.025);
+      ctx.fillRect(0, visibleTop, width, Math.max(0, visibleBottom - visibleTop));
+      const boundaryY = band.isAbove ? band.top : band.bottom;
+      if (boundaryY >= 0 && boundaryY <= height) {
+        ctx.strokeStyle = colorWithAlpha(color, dark ? 0.24 : 0.18);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, Math.round(boundaryY) + 0.5);
+        ctx.lineTo(width, Math.round(boundaryY) + 0.5);
+        ctx.stroke();
+      }
+
+      const captionY = band.isAbove ? band.top + 6 : band.bottom - 18;
+      if (captionY >= -2 && captionY <= height - 8) {
+        ctx.fillStyle = colorWithAlpha(color, dark ? 0.82 : 0.72);
+        ctx.textAlign = 'left';
+        ctx.fillText(
+          state.events.find(event => event.category === band.category)?.categoryLabel || band.category,
+          GROUP_LANE_LABEL_INSET,
+          captionY
+        );
+      }
+    }
+    ctx.restore();
+  }
+
   function drawEvents(width, height, axisY) {
     // Pack against the complete enabled data set, not just the current viewport.
-    // This keeps lane assignment stable while panning at a fixed zoom level.
+    // Group membership is the first layout boundary: each group owns a fixed
+    // vertical band, then Importance decides which records win space inside it.
     const candidates = state.events.filter(event =>
       event.elementType !== 'Title' && state.enabledCategories.has(event.category)
     );
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
-    const above = candidates.filter(event => isPrimaryCategory(event.category));
-    const below = candidates.filter(event => !isPrimaryCategory(event.category));
-    const abovePoints = above.filter(event => event.elementType !== 'Period');
-    const belowPoints = below.filter(event => event.elementType !== 'Period');
-    const abovePeriods = above.filter(event => event.elementType === 'Period' && event.end != null);
-    const belowPeriods = below.filter(event => event.elementType === 'Period' && event.end != null);
+    const bands = groupLaneLayout(axisY);
+    drawGroupLaneBands(width, height, bands);
 
-    const abovePointLanes = drawPointRows(abovePoints, width, height, axisY, true, threshold);
-    const belowPointLanes = drawPointRows(belowPoints, width, height, axisY, false, threshold);
+    const pointLaneCounts = new Map();
+    for (const band of bands.values()) {
+      const groupEvents = candidates.filter(event => event.category === band.category);
+      const points = groupEvents.filter(event => event.elementType !== 'Period');
+      const pointLaneCount = drawPointRows(points, width, height, axisY, band.isAbove, threshold, band);
+      pointLaneCounts.set(band.category, pointLaneCount);
+    }
+
+    // Connector lines are painted before period blocks so periods naturally
+    // occlude unrelated leaders, matching the pre-recovery renderer behavior.
     drawLeaderLines(axisY);
     state.pendingLeadersDrawn = true;
 
-    drawPeriodRows(abovePeriods, width, height, axisY, threshold, true, abovePointLanes);
-    drawPeriodRows(belowPeriods, width, height, axisY, threshold, false, belowPointLanes);
+    for (const band of bands.values()) {
+      const periods = candidates.filter(event =>
+        event.category === band.category && event.elementType === 'Period' && event.end != null
+      );
+      drawPeriodRows(
+        periods,
+        width,
+        height,
+        axisY,
+        threshold,
+        band.isAbove,
+        pointLaneCounts.get(band.category) || 0,
+        band
+      );
+    }
   }
 
   function resolvePosition(event) {
@@ -3059,7 +3160,7 @@
     return width;
   }
 
-  function drawPointRows(events, width, height, axisY, isAbove, threshold) {
+  function drawPointRows(events, width, height, axisY, isAbove, threshold, band = null) {
     // Higher-importance records get first choice of limited lanes. Date and ID
     // provide deterministic tie-breakers so panning never arbitrarily swaps winners.
     const sorted = [...events].sort((a, b) =>
@@ -3068,9 +3169,11 @@
       String(a.id || '').localeCompare(String(b.id || ''))
     );
     const laneIntervals = [];
-    const maxLabelLanes = isAbove
-      ? Math.max(0, Math.floor((axisY - 60) / 34) + 1)
-      : Math.max(0, Math.floor((height - axisY - 65) / 34) + 1);
+    const maxLabelLanes = band
+      ? Math.max(0, Math.floor((GROUP_LANE_HEIGHT - 26) / 34))
+      : isAbove
+        ? Math.max(0, Math.floor((axisY - 60) / 34) + 1)
+        : Math.max(0, Math.floor((height - axisY - 65) / 34) + 1);
     let maxLabelLane = -1;
 
     // Allocate compact micro-lanes for touching or overlapping duration spans.
@@ -3147,11 +3250,15 @@
           maxLabelLane = Math.max(maxLabelLane, lane);
         }
       }
-      if (!showLabel) recordOverflowEvent(event, x, isAbove);
+      if (!showLabel) recordOverflowEvent(event, x, isAbove, band);
 
       const labelHeight = 27;
       const laneGap = 34;
-      const labelTop = isAbove ? axisY - 58 - lane * laneGap : axisY + 36 + lane * laneGap;
+      const labelTop = band
+        ? (isAbove
+          ? band.bottom - 34 - lane * laneGap
+          : band.top + 12 + lane * laneGap)
+        : (isAbove ? axisY - 58 - lane * laneGap : axisY + 36 + lane * laneGap);
 
       // Theme-specific attachment geometry:
       // - Gradient joins the straight portion of the rounded left edge.
@@ -3177,8 +3284,9 @@
       const microLane = hasRange ? (durationLanes.get(event.id) || 0) : 0;
       const axisHalfThickness = 2;
       const spanHalfThickness = 1.5;
+      const groupSpanBase = band ? band.index * 8 : 0;
       const spanOffset = hasRange
-        ? axisHalfThickness + spanHalfThickness + microLane * 4
+        ? axisHalfThickness + spanHalfThickness + groupSpanBase + microLane * 4
         : 0;
       const spanY = hasRange
         ? axisY + (isAbove ? -spanOffset : spanOffset)
@@ -3364,13 +3472,17 @@
     return maxLabelLane + 1;
   }
 
-  function recordOverflowEvent(event, x, isAbove) {
+  function recordOverflowEvent(event, x, isAbove, band = null) {
     if (!Number.isFinite(x) || !event) return;
     state.pendingOverflow.push({
       event,
       x,
       time: Number(event.start),
-      isAbove: Boolean(isAbove)
+      isAbove: Boolean(isAbove),
+      category: event.category,
+      cueY: band
+        ? (isAbove ? band.top + 2 : band.bottom - 15)
+        : null
     });
   }
 
@@ -3382,7 +3494,7 @@
     for (const item of state.pendingOverflow) {
       if (item.x < -8 || item.x > width + 8) continue;
       const bucket = Math.round(item.x / bucketSize);
-      const key = `${item.isAbove ? 'above' : 'below'}:${bucket}`;
+      const key = `${item.isAbove ? 'above' : 'below'}:${item.category || ''}:${bucket}`;
       if (!clusters.has(key)) clusters.set(key, []);
       clusters.get(key).push(item);
     }
@@ -3392,6 +3504,7 @@
       const x = items.reduce((sum, item) => sum + item.x, 0) / items.length;
       const time = items.reduce((sum, item) => sum + item.time, 0) / items.length;
       const isAbove = items[0].isAbove;
+      const cueY = items.find(item => Number.isFinite(item.cueY))?.cueY;
       const cue = document.createElement('button');
       cue.type = 'button';
       cue.className = 'timeline-overflow-cue';
@@ -3408,7 +3521,7 @@
         'cursor:pointer',
         'z-index:8',
         `left:${Math.round(Math.max(0, Math.min(width - 24, x - 12)))}px`,
-        `top:${isAbove ? 2 : Math.max(2, height - 15)}px`
+        `top:${Math.round(Math.max(2, Math.min(height - 15, Number.isFinite(cueY) ? cueY : (isAbove ? 2 : height - 15))))}px`
       ].join(';');
       cue.innerHTML = `<svg viewBox="0 0 24 13" width="24" height="13" aria-hidden="true">
         <path d="M2 2.5 L12 10.5 L22 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -3442,7 +3555,7 @@
     return `rgb(${a.map((v, i) => Math.round(v * t + b[i] * (1 - t))).join(',')})`;
   }
 
-  function drawPeriodRows(periods, width, height, axisY, threshold, isAbove, pointLaneCount = 0) {
+  function drawPeriodRows(periods, width, height, axisY, threshold, isAbove, pointLaneCount = 0, band = null) {
     const barHeight = 28;
     const laneGap = 36;
     const pointLabelHeight = 27;
@@ -3450,21 +3563,26 @@
     const separation = 12;
 
     const outermostPointTop = pointLaneCount > 0
-      ? axisY - 58 - (pointLaneCount - 1) * pointLaneGap
-      : axisY;
+      ? (band ? band.bottom - 34 - (pointLaneCount - 1) * pointLaneGap : axisY - 58 - (pointLaneCount - 1) * pointLaneGap)
+      : (band ? band.bottom : axisY);
     const outermostPointBottom = pointLaneCount > 0
-      ? axisY + 36 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight
-      : axisY;
-    const firstPeriodY = isAbove
-      ? Math.min(axisY - 112, outermostPointTop - separation - barHeight)
-      : Math.max(axisY + 92, outermostPointBottom + separation);
+      ? (band ? band.top + 12 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight : axisY + 36 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight)
+      : (band ? band.top : axisY);
+    const firstPeriodY = band
+      ? (isAbove
+        ? outermostPointTop - separation - barHeight
+        : outermostPointBottom + separation)
+      : (isAbove
+        ? Math.min(axisY - 112, outermostPointTop - separation - barHeight)
+        : Math.max(axisY + 92, outermostPointBottom + separation));
 
     let maxPeriodLanes = 0;
     while (maxPeriodLanes < 64) {
       const y = isAbove
         ? firstPeriodY - maxPeriodLanes * laneGap
         : firstPeriodY + maxPeriodLanes * laneGap;
-      if (y + barHeight <= 2 || y >= height - 2) break;
+      const outsideBand = band && (y < band.top + 2 || y + barHeight > band.bottom - 2);
+      if (outsideBand || y + barHeight <= 2 || y >= height - 2) break;
       maxPeriodLanes++;
     }
 
@@ -3494,7 +3612,7 @@
       }
 
       if (lane >= maxPeriodLanes) {
-        recordOverflowEvent(event, Math.max(0, Math.min(width, (left + right) / 2)), isAbove);
+        recordOverflowEvent(event, Math.max(0, Math.min(width, (left + right) / 2)), isAbove, band);
         continue;
       }
       if (!laneIntervals[lane]) laneIntervals[lane] = [];
