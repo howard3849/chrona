@@ -45,6 +45,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.2
+
+Made the horizontal time axis a permanent foreground HUD so event and period blocks pass behind the complete axis strip in both normal and sticky states. Event-year labels now share the foreground axis layer. Group lanes are visually transparent while keeping separators/captions. Cluster disclosures point away from the axis, animate the affected group open, guarantee the clicked cluster is revealed, and repack the whole group so neighboring overflow can also disappear when space permits. Reworked the radar lens to represent the actual vertically visible content window and total content extent, including expanded groups, independent of sticky-axis clamping.
+
 ### 2.8.1
 
 Refined the reconstructed group-lane system: the complete timeline-axis strip now remains readable when pinned to the top or bottom edge, including regular tick labels and event-year anchors. Overflow disclosure controls now live on their actual group boundaries and scroll away with the group instead of sticking to the viewport; activating one expands only that group beyond its preset height. The disclosure uses a compact editorial caret-and-count pill for legibility. Corrected the radar lens vertical mapping so it follows the section of timeline content actually exposed by vertical navigation.

@@ -38,6 +38,9 @@
   const labelLayer = document.getElementById('labelLayer');
   const leaderCanvas = document.getElementById('leaderCanvas');
   const leaderCtx = leaderCanvas.getContext('2d');
+  const axisCanvas = document.getElementById('axisCanvas');
+  const axisCtx = axisCanvas.getContext('2d');
+  const axisLabelLayer = document.getElementById('axisLabelLayer');
   const tooltip = document.getElementById('tooltip');
   const statusEl = document.getElementById('status');
   const quickFiltersEl = document.getElementById('categoryQuickFilters');
@@ -148,6 +151,8 @@
     pendingLeaders: [],
     pendingOverflow: [],
     expandedGroupHeights: new Map(),
+    groupHeightAnimation: null,
+    forcedRevealEventIds: new Set(),
     renderQueued: false,
     hitTargets: [],
     selectedEvent: null,
@@ -1558,6 +1563,9 @@
     state.overviewCategorySnapshot = new Set(state.enabledCategories);
     state.overviewBounds = null;
     state.expandedGroupHeights.clear();
+    state.forcedRevealEventIds.clear();
+    if (state.groupHeightAnimation) cancelAnimationFrame(state.groupHeightAnimation);
+    state.groupHeightAnimation = null;
     const times = state.events.flatMap(e => [e.start, e.end]).filter(v => v != null);
     state.minTime = Math.min(...times);
     state.maxTime = Math.max(...times);
@@ -2330,6 +2338,8 @@
   function resetRendererMode() {
     const mobile = isPhoneVerticalMode();
     viewport.classList.toggle('is-phone-vertical', mobile);
+    axisCanvas.hidden = mobile;
+    axisLabelLayer.hidden = mobile;
     if (!mobile) {
       viewport.style.removeProperty('--mobile-content-height');
       labelLayer.style.height = '';
@@ -2750,11 +2760,16 @@
     canvas.height = Math.round(rect.height * state.dpr);
     leaderCanvas.width = Math.round(rect.width * state.dpr);
     leaderCanvas.height = Math.round(rect.height * state.dpr);
+    axisCanvas.width = Math.round(rect.width * state.dpr);
+    axisCanvas.height = Math.round(rect.height * state.dpr);
     ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
     leaderCtx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    axisCtx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
     ctx.clearRect(0, 0, rect.width, rect.height);
     leaderCtx.clearRect(0, 0, rect.width, rect.height);
+    axisCtx.clearRect(0, 0, rect.width, rect.height);
     labelLayer.replaceChildren();
+    axisLabelLayer.replaceChildren();
     state.hitTargets = [];
     state.eventYearZones = [];
     state.eventLabelZones = [];
@@ -2766,13 +2781,15 @@
     const axisY = stickyAxisY(rect.height, contentAxisY);
     drawBackground(rect.width, rect.height);
     drawYearCursorCanvas(rect.height);
-    drawAxis(rect.width, axisY);
     // Event/period lanes continue to move with the unclamped content axis while
     // the year axis itself sticks to the nearest canvas edge.
     drawEvents(rect.width, rect.height, contentAxisY, axisY);
     drawEventYears();
     drawOverflowCues(rect.width, rect.height);
-    drawTicks(rect.width, axisY);
+    // The complete axis HUD is painted last on its own higher-z canvas so every
+    // scrolling timeline block passes behind it in normal and sticky states.
+    drawAxis(rect.width, axisY, axisCtx);
+    drawTicks(rect.width, axisY, axisCtx);
     drawOverview();
     updateLaneLegends();
     syncZoomDial();
@@ -2902,13 +2919,19 @@
     ctx.restore();
   }
 
-  function drawAxis(width, axisY) {
-    ctx.strokeStyle = cssVar('--axis', '#30363d');
-    ctx.lineWidth = document.documentElement.dataset.theme === 'dark' ? 3 : 2;
-    ctx.beginPath();
-    ctx.moveTo(0, axisY + 0.5);
-    ctx.lineTo(width, axisY + 0.5);
-    ctx.stroke();
+  function drawAxis(width, axisY, paintCtx = ctx) {
+    paintCtx.save();
+    // A restrained translucent strip makes scrolling blocks visibly pass behind
+    // the axis HUD while preserving the parchment tone underneath.
+    paintCtx.fillStyle = cssVar('--surface-axis-band', 'rgba(218,224,234,.52)');
+    paintCtx.fillRect(0, Math.max(0, axisY - 30), width, 60);
+    paintCtx.strokeStyle = cssVar('--axis', '#30363d');
+    paintCtx.lineWidth = document.documentElement.dataset.theme === 'dark' ? 3 : 2;
+    paintCtx.beginPath();
+    paintCtx.moveTo(0, axisY + 0.5);
+    paintCtx.lineTo(width, axisY + 0.5);
+    paintCtx.stroke();
+    paintCtx.restore();
   }
 
   function chooseTickStep(span, width) {
@@ -2927,7 +2950,7 @@
     return majorStep / 4;
   }
 
-  function drawTicks(width, axisY) {
+  function drawTicks(width, axisY, paintCtx = ctx) {
     const span = state.viewEnd - state.viewStart;
     const majorStep = chooseTickStep(span, width);
     const minorStep = chooseMinorTickStep(majorStep);
@@ -2935,43 +2958,45 @@
     const viewportHeight = Math.max(1, viewport.clientHeight || 1);
     const labelsBelow = axisY <= viewportHeight - 30;
 
-    ctx.font = '12px -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = labelsBelow ? 'top' : 'bottom';
+    paintCtx.save();
+    paintCtx.font = '12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
+    paintCtx.textAlign = 'center';
+    paintCtx.textBaseline = labelsBelow ? 'top' : 'bottom';
 
     for (let value = firstMinor; value <= state.viewEnd + minorStep; value += minorStep) {
       const x = timeToX(value, width);
       if (x < -20 || x > width + 20) continue;
       const majorIndex = Math.round(value / majorStep);
       const isMajor = Math.abs(value - majorIndex * majorStep) < minorStep * 0.05;
-      ctx.strokeStyle = isMajor ? cssVar('--tick-major', '#68717b') : cssVar('--tick-minor', '#c4cbd2');
-      ctx.lineWidth = isMajor ? 1.1 : 0.7;
-      ctx.beginPath();
-      ctx.moveTo(x, axisY - (isMajor ? 8 : 4));
-      ctx.lineTo(x, axisY + (isMajor ? 8 : 4));
-      ctx.stroke();
+      paintCtx.strokeStyle = isMajor ? cssVar('--tick-major', '#68717b') : cssVar('--tick-minor', '#c4cbd2');
+      paintCtx.lineWidth = isMajor ? 1.1 : 0.7;
+      paintCtx.beginPath();
+      paintCtx.moveTo(x, axisY - (isMajor ? 8 : 4));
+      paintCtx.lineTo(x, axisY + (isMajor ? 8 : 4));
+      paintCtx.stroke();
       if (isMajor) {
         const collidesWithEventYear = state.eventYearZones.some(zone =>
           zone.side === (labelsBelow ? 'below' : 'above') && Math.abs(zone.x - x) < Math.max(24, zone.width / 2 + 10)
         );
         if (!collidesWithEventYear) {
-          ctx.fillStyle = cssVar('--text-muted', '#69717d');
+          paintCtx.fillStyle = cssVar('--text-muted', '#69717d');
           const label = majorStep < 1 ? formatFineDate(value, majorStep) : formatYear(value);
-          ctx.fillText(label, x, labelsBelow ? axisY + 11 : axisY - 11);
+          paintCtx.fillText(label, x, labelsBelow ? axisY + 11 : axisY - 11);
         }
       }
     }
 
     const titleBelow = axisY < 26;
-    ctx.font = '600 12px -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = titleBelow ? 'top' : 'bottom';
-    ctx.fillStyle = cssVar('--text', '#17191c');
-    ctx.fillText(
+    paintCtx.font = '600 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
+    paintCtx.textAlign = 'left';
+    paintCtx.textBaseline = titleBelow ? 'top' : 'bottom';
+    paintCtx.fillStyle = cssVar('--text', '#17191c');
+    paintCtx.fillText(
       state.viewEnd < 0 ? 'YEAR (BCE)' : state.viewStart >= 1 ? 'YEAR (CE)' : 'YEAR (BCE / CE)',
       12,
       titleBelow ? axisY + 13 : axisY - 13
     );
+    paintCtx.restore();
   }
 
   function formatFineDate(value, step) {
@@ -3095,10 +3120,8 @@
       const visibleBottom = Math.min(height, band.bottom);
       if (visibleBottom <= 0 || visibleTop >= height) continue;
 
-      // A restrained tint and far-edge separator make each group read as its own
-      // lane without turning the timeline into a grid of heavy boxes.
-      ctx.fillStyle = colorWithAlpha(color, dark ? 0.035 : 0.025);
-      ctx.fillRect(0, visibleTop, width, Math.max(0, visibleBottom - visibleTop));
+      // Lane interiors are intentionally transparent; only the boundary and
+      // caption identify the group so the canvas hue remains continuous.
       const boundaryY = band.isAbove ? band.top : band.bottom;
       if (boundaryY >= 0 && boundaryY <= height) {
         ctx.strokeStyle = colorWithAlpha(color, dark ? 0.24 : 0.18);
@@ -3183,6 +3206,7 @@
     // Higher-importance records get first choice of limited lanes. Date and ID
     // provide deterministic tie-breakers so panning never arbitrarily swaps winners.
     const sorted = [...events].sort((a, b) =>
+      Number(state.forcedRevealEventIds.has(b.id)) - Number(state.forcedRevealEventIds.has(a.id)) ||
       (importanceRank[b.importance] || 2) - (importanceRank[a.importance] || 2) ||
       a.start - b.start ||
       String(a.id || '').localeCompare(String(b.id || ''))
@@ -3503,12 +3527,69 @@
     });
   }
 
-  function expandOverflowGroup(category, hiddenCount) {
+  function animateGroupHeight(category, targetHeight, onDone = null) {
     if (!category) return;
-    const current = groupLaneHeight(category);
-    const extra = Math.max(GROUP_LANE_EXPAND_STEP * 2, Math.max(1, hiddenCount) * GROUP_LANE_EXPAND_STEP);
-    state.expandedGroupHeights.set(category, current + extra);
+    if (state.groupHeightAnimation) cancelAnimationFrame(state.groupHeightAnimation);
+    const from = groupLaneHeight(category);
+    const to = Math.max(from, targetHeight);
+    if (to <= from + 0.5) {
+      onDone?.();
+      return;
+    }
+    const started = performance.now();
+    const duration = 280;
+    const ease = t => 1 - Math.pow(1 - t, 3);
+
+    const frame = now => {
+      const progress = Math.min(1, (now - started) / duration);
+      state.expandedGroupHeights.set(category, from + (to - from) * ease(progress));
+      scheduleRender();
+      if (progress < 1) {
+        state.groupHeightAnimation = requestAnimationFrame(frame);
+      } else {
+        state.groupHeightAnimation = null;
+        state.expandedGroupHeights.set(category, to);
+        scheduleRender();
+        onDone?.();
+      }
+    };
+    state.groupHeightAnimation = requestAnimationFrame(frame);
+  }
+
+  function ensureOverflowClusterRevealed(category, eventIds, attempt = 0) {
+    if (!category || !eventIds?.size || attempt > 4) return;
     scheduleRender();
+    requestAnimationFrame(() => {
+      const remaining = state.pendingOverflow.filter(item =>
+        item.category === category && eventIds.has(item.event?.id)
+      );
+      if (!remaining.length) return;
+      const current = groupLaneHeight(category);
+      const extraRows = Math.max(2, remaining.length + 1);
+      animateGroupHeight(
+        category,
+        current + extraRows * GROUP_LANE_EXPAND_STEP,
+        () => ensureOverflowClusterRevealed(category, eventIds, attempt + 1)
+      );
+    });
+  }
+
+  function expandOverflowGroup(category, items) {
+    if (!category || !items?.length) return;
+    const eventIds = new Set(items.map(item => item.event?.id).filter(Boolean));
+    eventIds.forEach(id => state.forcedRevealEventIds.add(id));
+
+    // Add enough rows for the clicked cluster in the worst case (one event per
+    // row), plus one breathing row. The whole group is repacked on every frame,
+    // so neighboring clusters automatically shrink/disappear whenever the new
+    // space also accommodates them.
+    const current = groupLaneHeight(category);
+    const extraRows = Math.max(2, items.length + 1);
+    animateGroupHeight(
+      category,
+      current + extraRows * GROUP_LANE_EXPAND_STEP,
+      () => ensureOverflowClusterRevealed(category, eventIds)
+    );
   }
 
   function drawOverflowCues(width, height) {
@@ -3566,13 +3647,15 @@
         `left:${Math.round(Math.max(0, Math.min(width - cueWidth, x - cueWidth / 2)))}px`,
         `top:${Math.round(boundaryY - cueHeight / 2)}px`
       ].join(';');
-      // Premium editorial disclosure pattern: a small caret plus a separate,
-      // legible count. The number never sits in or touches the caret valley.
-      cue.innerHTML = `<svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true" focusable="false"><path d="M1 1 L5 5 L9 1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font:700 10px/1 -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;min-width:10px;text-align:center">${items.length}</span>`;
+      // Editorial disclosure caret points toward the direction in which this
+      // group will grow: primary/above groups expand up; reference groups down.
+      // The count is separate from the caret valley for clean legibility.
+      const caretPath = items[0].isAbove ? 'M1 5 L5 1 L9 5' : 'M1 1 L5 5 L9 1';
+      cue.innerHTML = `<svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true" focusable="false"><path d="${caretPath}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font:700 10px/1 -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;min-width:10px;text-align:center">${items.length}</span>`;
       cue.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        expandOverflowGroup(category, items.length);
+        expandOverflowGroup(category, items);
       });
       labelLayer.appendChild(cue);
     }
@@ -3911,13 +3994,10 @@
       const width = Math.max(28, item.text.length * 7.1);
       const height = 14;
       const box = { x1: item.x - width / 2 - 3, x2: item.x + width / 2 + 3, y1: item.y - 2, y2: item.y + height + 2 };
-      const overlapsLabel = state.eventLabelZones.some(zone =>
-        box.x1 < zone.x2 + 3 && box.x2 > zone.x1 - 3 && box.y1 < zone.y2 + 3 && box.y2 > zone.y1 - 3
-      );
       const overlapsYear = accepted.some(zone =>
         zone.side === item.side && box.x1 < zone.x2 + 7 && box.x2 > zone.x1 - 7 && box.y1 < zone.y2 + 2 && box.y2 > zone.y1 - 2
       );
-      if (overlapsLabel || overlapsYear) continue;
+      if (overlapsYear) continue;
 
       accepted.push({ ...box, side: item.side, x: item.x, width });
       state.eventYearZones.push({ x: item.x, width, side: item.side, lane: 0 });
@@ -3928,7 +4008,7 @@
       year.style.transform = 'translateX(-50%)';
       year.style.top = `${item.y}px`;
       year.style.color = item.color;
-      labelLayer.appendChild(year);
+      axisLabelLayer.appendChild(year);
     }
   }
 
@@ -4673,18 +4753,29 @@
       const right = ((state.viewEnd - dataMin) / span) * rect.width;
       const clampedLeft = Math.max(0, Math.min(rect.width, left));
       const clampedRight = Math.max(0, Math.min(rect.width, right));
-      // Desktop/tablet radar is two-dimensional: horizontal position follows
-      // the visible time span while the frame's vertical position follows the
-      // canvas's vertical lane pan. This keeps the radar truthful after the axis
-      // itself becomes sticky at a canvas edge.
-      const verticalRange = Math.max(0.0001, DESKTOP_AXIS_MAX_RATIO - DESKTOP_AXIS_MIN_RATIO);
-      const verticalPosition = Math.max(0, Math.min(1,
-        (DESKTOP_AXIS_MAX_RATIO - state.axisYRatio) / verticalRange
-      ));
-      const verticalWindowFraction = 1 / (verticalRange + 1);
-      const verticalWindowHeight = Math.max(10, rect.height * verticalWindowFraction);
-      const verticalTop = (rect.height - verticalWindowHeight) * verticalPosition;
-      overviewWindow.style.top = `${verticalTop}px`;
+      // Desktop/tablet radar is a true viewport into the vertically translated
+      // timeline content. Sticky-axis clamping has no effect on this geometry.
+      const viewportHeight = Math.max(1, viewport.getBoundingClientRect().height);
+      const contentBands = groupLaneLayout(0);
+      let contentMin = -AXIS_STICKY_TOP_INSET;
+      let contentMax = AXIS_STICKY_BOTTOM_INSET;
+      for (const band of contentBands.values()) {
+        contentMin = Math.min(contentMin, band.top);
+        contentMax = Math.max(contentMax, band.bottom);
+      }
+
+      // Include the full allowed navigation envelope so the lens keeps moving
+      // even when the viewport is temporarily beyond the outermost group.
+      const worldMin = Math.min(contentMin, -viewportHeight * DESKTOP_AXIS_MAX_RATIO);
+      const worldMax = Math.max(contentMax, viewportHeight - viewportHeight * DESKTOP_AXIS_MIN_RATIO);
+      const worldSpan = Math.max(viewportHeight, worldMax - worldMin);
+      const visibleTop = -viewportHeight * state.axisYRatio;
+      const visibleBottom = visibleTop + viewportHeight;
+      const lensTopRatio = Math.max(0, Math.min(1, (visibleTop - worldMin) / worldSpan));
+      const lensBottomRatio = Math.max(lensTopRatio, Math.min(1, (visibleBottom - worldMin) / worldSpan));
+      const verticalTop = rect.height * lensTopRatio;
+      const verticalWindowHeight = Math.max(10, rect.height * (lensBottomRatio - lensTopRatio));
+      overviewWindow.style.top = `${Math.max(0, Math.min(rect.height - verticalWindowHeight, verticalTop))}px`;
       overviewWindow.style.bottom = 'auto';
       overviewWindow.style.height = `${verticalWindowHeight}px`;
       overviewWindow.style.right = '';

@@ -201,8 +201,11 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
   mix-blend-mode: soft-light;
 }
 .timeline-viewport:focus { box-shadow: inset 0 0 0 2px var(--focus); }
-#timelineCanvas, .label-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
+#timelineCanvas, .label-layer, .leader-canvas, .axis-canvas, .axis-label-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
 .label-layer { pointer-events: none; overflow: hidden; z-index: 2; }
+.leader-canvas { pointer-events: none; z-index: 1; }
+.axis-canvas { pointer-events: none; z-index: 5; }
+.axis-label-layer { pointer-events: none; overflow: hidden; z-index: 5; }
 
 /* v2.5.7 — stronger layered surfaces and desktop paper canvas.
    Desktop gains depth; iPad and iPhone remain edge-to-edge and space efficient. */
@@ -342,6 +345,7 @@ html[data-preview-size="phone"] .overview-navigator .overview-heading {
   backdrop-filter: none;
 }
 .event-year { position: absolute; font-size: 12px; line-height: 1; font-weight: 560; white-space: nowrap; text-align: center; text-shadow: 0 1px 0 color-mix(in srgb, var(--surface-solid) 75%, transparent); }
+.axis-label-layer .event-year { z-index: 1; }
 
 .tooltip {
   position: absolute;

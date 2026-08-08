@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Chrona — Interactive Timeline Explorer</title>
-  <link rel="stylesheet" href="styles.css?v=2.8.1">
-  <link rel="stylesheet" href="css/theme-colors.css?v=2.8.1">
-  <link rel="stylesheet" href="css/search.css?v=2.8.1">
-  <link rel="stylesheet" href="css/year-ruler.css?v=2.8.1">
-  <link rel="stylesheet" href="css/phone-period.css?v=2.8.1">
-  <link rel="stylesheet" href="css/list-view.css?v=2.8.1">
+  <link rel="stylesheet" href="styles.css?v=2.8.2">
+  <link rel="stylesheet" href="css/theme-colors.css?v=2.8.2">
+  <link rel="stylesheet" href="css/search.css?v=2.8.2">
+  <link rel="stylesheet" href="css/year-ruler.css?v=2.8.2">
+  <link rel="stylesheet" href="css/phone-period.css?v=2.8.2">
+  <link rel="stylesheet" href="css/list-view.css?v=2.8.2">
 </head>
 <body>
   <header class="app-header">
@@ -143,7 +143,7 @@
     <section class="settings-section settings-version-section">
       <div class="settings-version-row">
         <span data-i18n="settings.version">Version</span>
-        <code id="appVersion">v2.8.1</code>
+        <code id="appVersion">v2.8.2</code>
       </div>
     </section>
   </aside>
@@ -186,6 +186,8 @@
       <canvas id="timelineCanvas"></canvas>
       <div id="labelLayer" class="label-layer"></div>
       <canvas id="leaderCanvas" class="leader-canvas" aria-hidden="true"></canvas>
+      <canvas id="axisCanvas" class="axis-canvas" aria-hidden="true"></canvas>
+      <div id="axisLabelLayer" class="axis-label-layer" aria-hidden="true"></div>
       <div id="tooltip" class="tooltip" hidden></div>
       <aside id="detailPanel" class="detail-panel" hidden aria-label="Timeline item details" aria-modal="false">
         <button id="detailClose" class="detail-close" type="button" aria-label="Close details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
@@ -224,8 +226,8 @@
   </template>
 
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script defer src="version.js?v=2.8.1"></script>
-  <script defer src="sample-data.js?v=2.8.1"></script>
-  <script defer src="timeline.js?v=2.8.1"></script>
+  <script defer src="version.js?v=2.8.2"></script>
+  <script defer src="sample-data.js?v=2.8.2"></script>
+  <script defer src="timeline.js?v=2.8.2"></script>
 </body>
 </html>
