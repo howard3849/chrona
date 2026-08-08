@@ -41,6 +41,7 @@
   const axisCanvas = document.getElementById('axisCanvas');
   const axisCtx = axisCanvas.getContext('2d');
   const axisLabelLayer = document.getElementById('axisLabelLayer');
+  const groupLabelLayer = document.getElementById('groupLabelLayer');
   const tooltip = document.getElementById('tooltip');
   const statusEl = document.getElementById('status');
   const quickFiltersEl = document.getElementById('categoryQuickFilters');
@@ -2770,6 +2771,7 @@
     axisCtx.clearRect(0, 0, rect.width, rect.height);
     labelLayer.replaceChildren();
     axisLabelLayer.replaceChildren();
+    groupLabelLayer.replaceChildren();
     state.hitTargets = [];
     state.eventYearZones = [];
     state.eventLabelZones = [];
@@ -3134,13 +3136,13 @@
 
       const captionY = band.isAbove ? band.top + 6 : band.bottom - 18;
       if (captionY >= -2 && captionY <= height - 8) {
-        ctx.fillStyle = colorWithAlpha(color, dark ? 0.82 : 0.72);
-        ctx.textAlign = 'left';
-        ctx.fillText(
-          state.events.find(event => event.category === band.category)?.categoryLabel || band.category,
-          GROUP_LANE_LABEL_INSET,
-          captionY
-        );
+        const caption = document.createElement('div');
+        caption.className = 'group-lane-label';
+        caption.textContent = state.events.find(event => event.category === band.category)?.categoryLabel || band.category;
+        caption.style.left = `${GROUP_LANE_LABEL_INSET}px`;
+        caption.style.top = `${Math.round(captionY)}px`;
+        caption.style.color = colorWithAlpha(color, dark ? 0.92 : 0.86);
+        groupLabelLayer.appendChild(caption);
       }
     }
     ctx.restore();
@@ -3618,8 +3620,8 @@
       const time = items.reduce((sum, item) => sum + item.time, 0) / items.length;
       const category = items[0].category || '';
       const color = items[0].event?.color || categoryColor(category);
-      const cueWidth = 42;
-      const cueHeight = 20;
+      const cueWidth = 44;
+      const cueHeight = 24;
       const cue = document.createElement('button');
       cue.type = 'button';
       cue.className = 'timeline-overflow-cue';
@@ -3639,7 +3641,9 @@
         `color:${color}`,
         'box-shadow:0 2px 8px rgba(15,23,42,.12)',
         'cursor:pointer',
-        'z-index:8',
+        'pointer-events:auto',
+        'touch-action:manipulation',
+        'z-index:9',
         'display:flex',
         'align-items:center',
         'justify-content:center',
@@ -3652,6 +3656,9 @@
       // The count is separate from the caret valley for clean legibility.
       const caretPath = items[0].isAbove ? 'M1 5 L5 1 L9 5' : 'M1 1 L5 5 L9 1';
       cue.innerHTML = `<svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true" focusable="false"><path d="${caretPath}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font:700 10px/1 -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;min-width:10px;text-align:center">${items.length}</span>`;
+      cue.addEventListener('pointerdown', event => {
+        event.stopPropagation();
+      });
       cue.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
@@ -4020,6 +4027,12 @@
   }
 
   function onViewportClick(event) {
+    if (event.target.closest?.('.timeline-overflow-cue')) return;
+    const overflowControlAtPoint = [...labelLayer.querySelectorAll('.timeline-overflow-cue')].some(control => {
+      const box = control.getBoundingClientRect();
+      return event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
+    });
+    if (overflowControlAtPoint) return;
     if (isInsideZoomRail(event.clientX, event.clientY)) return;
     if (state.movedDuringDrag) {
       state.movedDuringDrag = false;
@@ -4753,8 +4766,9 @@
       const right = ((state.viewEnd - dataMin) / span) * rect.width;
       const clampedLeft = Math.max(0, Math.min(rect.width, left));
       const clampedRight = Math.max(0, Math.min(rect.width, right));
-      // Desktop/tablet radar is a true viewport into the vertically translated
-      // timeline content. Sticky-axis clamping has no effect on this geometry.
+      // Radar vertical geometry uses the same world coordinate system as the
+      // group layout. The content axis is world y=0; vertical panning changes
+      // which world-y interval is visible. Sticky-axis clamping is irrelevant.
       const viewportHeight = Math.max(1, viewport.getBoundingClientRect().height);
       const contentBands = groupLaneLayout(0);
       let contentMin = -AXIS_STICKY_TOP_INSET;
@@ -4764,18 +4778,20 @@
         contentMax = Math.max(contentMax, band.bottom);
       }
 
-      // Include the full allowed navigation envelope so the lens keeps moving
-      // even when the viewport is temporarily beyond the outermost group.
-      const worldMin = Math.min(contentMin, -viewportHeight * DESKTOP_AXIS_MAX_RATIO);
-      const worldMax = Math.max(contentMax, viewportHeight - viewportHeight * DESKTOP_AXIS_MIN_RATIO);
-      const worldSpan = Math.max(viewportHeight, worldMax - worldMin);
+      const contentSpan = Math.max(1, contentMax - contentMin);
       const visibleTop = -viewportHeight * state.axisYRatio;
-      const visibleBottom = visibleTop + viewportHeight;
-      const lensTopRatio = Math.max(0, Math.min(1, (visibleTop - worldMin) / worldSpan));
-      const lensBottomRatio = Math.max(lensTopRatio, Math.min(1, (visibleBottom - worldMin) / worldSpan));
-      const verticalTop = rect.height * lensTopRatio;
-      const verticalWindowHeight = Math.max(10, rect.height * (lensBottomRatio - lensTopRatio));
-      overviewWindow.style.top = `${Math.max(0, Math.min(rect.height - verticalWindowHeight, verticalTop))}px`;
+      const availableTravel = Math.max(0, contentSpan - viewportHeight);
+      const lensFraction = Math.min(1, viewportHeight / contentSpan);
+      const verticalWindowHeight = Math.max(10, rect.height * lensFraction);
+
+      let verticalTop = 0;
+      if (availableTravel > 0) {
+        const clampedVisibleTop = Math.max(contentMin, Math.min(contentMax - viewportHeight, visibleTop));
+        const scrollRatio = (clampedVisibleTop - contentMin) / availableTravel;
+        verticalTop = (rect.height - verticalWindowHeight) * scrollRatio;
+      }
+
+      overviewWindow.style.top = `${verticalTop}px`;
       overviewWindow.style.bottom = 'auto';
       overviewWindow.style.height = `${verticalWindowHeight}px`;
       overviewWindow.style.right = '';

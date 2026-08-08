@@ -5926,3 +5926,30 @@ html[data-preview-size="tablet"] .settings-panel.settings-panel-compact {
   background: var(--surface-solid) !important;
   overflow-y: auto !important;
 }
+
+
+/* Chrona v2.8.3 — structural labels and overflow controls stay interactive/readable. */
+.group-label-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  overflow: hidden;
+}
+.group-lane-label {
+  position: absolute;
+  max-width: min(320px, calc(100% - 28px));
+  padding: 1px 5px 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-solid) 82%, transparent);
+  box-shadow: 0 1px 2px rgba(15,23,42,.05);
+  font: 650 10px/1.25 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--surface-solid) 82%, transparent);
+}
+.timeline-overflow-cue {
+  pointer-events: auto !important;
+  touch-action: manipulation;
+}

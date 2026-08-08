@@ -45,6 +45,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.3
+
+Fixed cluster disclosure interaction so overflow controls capture pointer input and cannot click through to hidden/underlying events; clicking a disclosure now reaches the animated group-expansion path reliably. Reworked radar vertical mapping to use the actual group-content world extent and the visible canvas world window rather than a synthetic navigation envelope. Moved group-lane captions to an unfaded structural overlay so viewport edge fades affect timeline content but not group identity labels.
+
 ### 2.8.2
 
 Made the horizontal time axis a permanent foreground HUD so event and period blocks pass behind the complete axis strip in both normal and sticky states. Event-year labels now share the foreground axis layer. Group lanes are visually transparent while keeping separators/captions. Cluster disclosures point away from the axis, animate the affected group open, guarantee the clicked cluster is revealed, and repack the whole group so neighboring overflow can also disappear when space permits. Reworked the radar lens to represent the actual vertically visible content window and total content extent, including expanded groups, independent of sticky-axis clamping.
