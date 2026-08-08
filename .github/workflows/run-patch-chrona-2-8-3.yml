@@ -1,0 +1,42 @@
+name: Run Chrona 2.8.3 patch
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'tools/patch_chrona_2_8_3.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Apply patch
+        run: python tools/patch_chrona_2_8_3.py
+      - name: Validate JavaScript
+        run: node --check timeline.js
+      - name: Validate synchronized version
+        run: |
+          test "$(cat VERSION)" = "2.8.3"
+          grep -q "2.8.3" version.js
+          grep -q "v2.8.3" index.html
+          grep -q "?v=2.8.3" index.html
+          grep -q "### 2.8.3" README.md
+          grep -q "groupLabelLayer" index.html
+          grep -q "timeline-overflow-cue" styles.css
+      - name: Commit patched Chrona
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timeline.js styles.css index.html VERSION version.js README.md
+          git commit -m "Chrona 2.8.3: fix cluster clicks radar and group labels"
+          git push origin dev
