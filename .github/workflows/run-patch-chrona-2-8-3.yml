@@ -3,8 +3,6 @@ name: Run Chrona 2.8.3 patch
 on:
   push:
     branches: [dev]
-    paths:
-      - 'tools/patch_chrona_2_8_3.py'
 
 permissions:
   contents: write
