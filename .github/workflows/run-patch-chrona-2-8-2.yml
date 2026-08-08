@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.x'
       - name: Apply patch
-        run: python tools/patch_chrona_2_8_2.py
+        run: python tools/run_patch_chrona_2_8_2.py
       - name: Validate JavaScript
         run: node --check timeline.js
       - name: Validate synchronized version
@@ -34,7 +34,7 @@ jobs:
       - name: Commit patched Chrona
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+howard3849@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add timeline.js styles.css index.html VERSION version.js README.md
           git commit -m "Chrona 2.8.2: foreground axis animated clusters radar geometry"
           git push origin dev
