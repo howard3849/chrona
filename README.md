@@ -20,6 +20,8 @@ Existing TimelineJS sheets should generally load without restructuring. Chrona r
 - `period` — a Chrona period block.
 - `title` — the dataset title row.
 
+`Importance` supports exactly `Major`, `Normal`, and `Minor`. A blank Importance cell is treated as `Normal`; legacy `Medium` values are normalized to `Normal` when loaded or exported.
+
 ## Quick start
 
 1. Host the Chrona files on GitHub Pages or another static web server.
@@ -42,6 +44,10 @@ language_available   en-US,zh-TW,fr,es
 Human translation columns take priority. When a translated cell is missing, Chrona may translate the baseline text on the fly when the browser supports that language pair. Entries under `never_translate.*` remain unchanged.
 
 ## Version history
+
+### 2.7.0
+
+Added stable priority-aware lane packing using Major → Normal → Minor, with blank Importance treated as Normal and legacy Medium values normalized. Hidden lane items now surface as compact numbered chevron overflow cues that zoom into their cluster instead of disappearing silently. The desktop/tablet year axis now sticks to the top or bottom canvas edge while event lanes continue to scroll, and the radar focus frame now tracks both the visible time range and vertical lane pan across responsive layouts.
 
 ### 2.6.3
 

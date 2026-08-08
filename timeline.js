@@ -140,6 +140,7 @@
     eventLabelZones: [],
     pendingEventYears: [],
     pendingLeaders: [],
+    pendingOverflow: [],
     renderQueued: false,
     hitTargets: [],
     selectedEvent: null,
@@ -691,7 +692,7 @@
     localStorage.removeItem('chrona-above-groups');
   }
 
-  const importanceRank = { Major: 3, Medium: 2, Minor: 1 };
+  const importanceRank = { Major: 3, Normal: 2, Minor: 1 };
   const loadedTimelineThumbnails = new Set();
   const failedTimelineThumbnails = new Set();
 
@@ -1025,6 +1026,16 @@
     });
   });
   applyPreviewSize(localStorage.getItem('chrona.previewSize') || 'computer');
+
+  // Radar and canvas must share the same live geometry. ResizeObserver catches
+  // preview-device changes, sidebar/layout changes, and real viewport resizing
+  // even when no browser window resize event fires.
+  if (window.ResizeObserver) {
+    const geometryObserver = new ResizeObserver(() => scheduleRender());
+    geometryObserver.observe(viewport);
+    if (overviewTrack) geometryObserver.observe(overviewTrack);
+  }
+
   viewport.addEventListener('keydown', onTimelineKeyDown);
   const overviewNavigator = document.getElementById('overviewNavigator');
   overviewNavigator.addEventListener('pointerdown', onOverviewPointerDown);
@@ -1252,6 +1263,7 @@
       delete row.Headline;
       delete row.Text;
       delete row.Position;
+      row.Importance = normalizeImportance(row.Importance);
       const group = String(row.Group || row.Category || 'Uncategorized').trim();
       const entityId = String(row['Event ID'] || generateEventId(group, row.Year, row.Title, index)).trim();
       row['Event ID'] = entityId;
@@ -1339,6 +1351,14 @@
     if (value === '' || value == null) return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
+  }
+
+  function normalizeImportance(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'major') return 'Major';
+    if (normalized === 'minor') return 'Minor';
+    if (normalized === 'normal' || normalized === 'medium' || !normalized) return 'Normal';
+    return 'Normal';
   }
 
   function normalizeElementType(value) {
@@ -1494,7 +1514,7 @@
         category: categoryName,
         elementType: normalizeElementType(row.Type || row['Element Type'] || 'event'),
         position: category.position || 'Below',
-        importance: row.Importance || 'Medium',
+        importance: normalizeImportance(row.Importance),
         color: state.groupColors.has(categoryName) ? category.color : normalizeHex(row.Color, category.color),
         visible: String(row.Visible).toUpperCase() !== 'FALSE' && start != null,
         media: normalizeMediaUrl(row.Media || row['Media URL'] || row.media || row.mediaUrl || ''),
@@ -2732,13 +2752,18 @@
     state.eventLabelZones = [];
     state.pendingEventYears = [];
     state.pendingLeaders = [];
+    state.pendingOverflow = [];
 
-    const axisY = rect.height * state.axisYRatio;
+    const contentAxisY = rect.height * state.axisYRatio;
+    const axisY = stickyAxisY(rect.height, contentAxisY);
     drawBackground(rect.width, rect.height);
     drawYearCursorCanvas(rect.height);
     drawAxis(rect.width, axisY);
-    drawEvents(rect.width, rect.height, axisY);
+    // Event/period lanes continue to move with the unclamped content axis while
+    // the year axis itself sticks to the nearest canvas edge.
+    drawEvents(rect.width, rect.height, contentAxisY);
     drawEventYears();
+    drawOverflowCues(rect.width, rect.height);
     drawTicks(rect.width, axisY);
     drawOverview();
     updateLaneLegends();
@@ -2899,10 +2924,12 @@
     const majorStep = chooseTickStep(span, width);
     const minorStep = chooseMinorTickStep(majorStep);
     const firstMinor = Math.floor(state.viewStart / minorStep) * minorStep;
+    const viewportHeight = Math.max(1, viewport.clientHeight || 1);
+    const labelsBelow = axisY <= viewportHeight - 30;
 
     ctx.font = '12px -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
+    ctx.textBaseline = labelsBelow ? 'top' : 'bottom';
 
     for (let value = firstMinor; value <= state.viewEnd + minorStep; value += minorStep) {
       const x = timeToX(value, width);
@@ -2917,21 +2944,26 @@
       ctx.stroke();
       if (isMajor) {
         const collidesWithEventYear = state.eventYearZones.some(zone =>
-          zone.side === 'below' && Math.abs(zone.x - x) < Math.max(24, zone.width / 2 + 10)
+          zone.side === (labelsBelow ? 'below' : 'above') && Math.abs(zone.x - x) < Math.max(24, zone.width / 2 + 10)
         );
         if (!collidesWithEventYear) {
           ctx.fillStyle = cssVar('--text-muted', '#69717d');
           const label = majorStep < 1 ? formatFineDate(value, majorStep) : formatYear(value);
-          ctx.fillText(label, x, axisY + 11);
+          ctx.fillText(label, x, labelsBelow ? axisY + 11 : axisY - 11);
         }
       }
     }
 
+    const titleBelow = axisY < 26;
     ctx.font = '600 12px -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif';
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
+    ctx.textBaseline = titleBelow ? 'top' : 'bottom';
     ctx.fillStyle = cssVar('--text', '#17191c');
-    ctx.fillText(state.viewEnd < 0 ? 'YEAR (BCE)' : state.viewStart >= 1 ? 'YEAR (CE)' : 'YEAR (BCE / CE)', 12, axisY - 13);
+    ctx.fillText(
+      state.viewEnd < 0 ? 'YEAR (BCE)' : state.viewStart >= 1 ? 'YEAR (CE)' : 'YEAR (BCE / CE)',
+      12,
+      titleBelow ? axisY + 13 : axisY - 13
+    );
   }
 
   function formatFineDate(value, step) {
@@ -2990,39 +3022,24 @@
   }
 
   function drawEvents(width, height, axisY) {
-    const q = state.searchQuery.trim().toLowerCase();
-    // Keep point labels alive until the complete rendered label has left the
-    // viewport. Culling by the event anchor caused long labels to disappear
-    // abruptly as soon as their dot crossed an edge. A 420 px time overscan is
-    // larger than the maximum event-label width and is recomputed at every zoom.
-    const timePerPixel = (state.viewEnd - state.viewStart) / Math.max(1, width);
-    const labelOverscanYears = timePerPixel * 420;
-    const visible = state.events.filter(e => {
-      if (!state.enabledCategories.has(e.category)) return false;
-      if (e.elementType === 'Period') {
-        return e.start <= state.viewEnd && (e.end ?? e.start) >= state.viewStart;
-      }
-      const hasRange = Number.isFinite(e.end) && e.end > e.start;
-      const anchor = e.start;
-      return anchor >= state.viewStart - labelOverscanYears && anchor <= state.viewEnd + labelOverscanYears;
-    });
+    // Pack against the complete enabled data set, not just the current viewport.
+    // This keeps lane assignment stable while panning at a fixed zoom level.
+    const candidates = state.events.filter(event =>
+      event.elementType !== 'Title' && state.enabledCategories.has(event.category)
+    );
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
-    const above = visible.filter(e => isPrimaryCategory(e.category));
-    const below = visible.filter(e => !isPrimaryCategory(e.category));
-    const abovePoints = above.filter(e => e.elementType !== 'Period');
-    const belowPoints = below.filter(e => e.elementType !== 'Period');
-    const abovePeriods = above.filter(e => e.elementType === 'Period' && e.end != null);
-    const belowPeriods = below.filter(e => e.elementType === 'Period' && e.end != null);
+    const above = candidates.filter(event => isPrimaryCategory(event.category));
+    const below = candidates.filter(event => !isPrimaryCategory(event.category));
+    const abovePoints = above.filter(event => event.elementType !== 'Period');
+    const belowPoints = below.filter(event => event.elementType !== 'Period');
+    const abovePeriods = above.filter(event => event.elementType === 'Period' && event.end != null);
+    const belowPeriods = below.filter(event => event.elementType === 'Period' && event.end != null);
 
-    // Lay out every point label first. This gives connector rendering complete
-    // knowledge of unrelated blocks so it can leave clean background gaps.
-    const abovePointLanes = drawPointRows(abovePoints, width, axisY, true, threshold);
-    const belowPointLanes = drawPointRows(belowPoints, width, axisY, false, threshold);
+    const abovePointLanes = drawPointRows(abovePoints, width, height, axisY, true, threshold);
+    const belowPointLanes = drawPointRows(belowPoints, width, height, axisY, false, threshold);
     drawLeaderLines(axisY);
     state.pendingLeadersDrawn = true;
 
-    // Period bars are painted afterward, with a small background isolation ring,
-    // so passing connectors never appear attached to an unrelated era block.
     drawPeriodRows(abovePeriods, width, height, axisY, threshold, true, abovePointLanes);
     drawPeriodRows(belowPeriods, width, height, axisY, threshold, false, belowPointLanes);
   }
@@ -3042,9 +3059,18 @@
     return width;
   }
 
-  function drawPointRows(events, width, axisY, isAbove, threshold) {
-    const sorted = [...events].sort((a, b) => a.start - b.start || (importanceRank[b.importance] - importanceRank[a.importance]));
-    const laneEnds = [];
+  function drawPointRows(events, width, height, axisY, isAbove, threshold) {
+    // Higher-importance records get first choice of limited lanes. Date and ID
+    // provide deterministic tie-breakers so panning never arbitrarily swaps winners.
+    const sorted = [...events].sort((a, b) =>
+      (importanceRank[b.importance] || 2) - (importanceRank[a.importance] || 2) ||
+      a.start - b.start ||
+      String(a.id || '').localeCompare(String(b.id || ''))
+    );
+    const laneIntervals = [];
+    const maxLabelLanes = isAbove
+      ? Math.max(0, Math.floor((axisY - 60) / 34) + 1)
+      : Math.max(0, Math.floor((height - axisY - 65) / 34) + 1);
     let maxLabelLane = -1;
 
     // Allocate compact micro-lanes for touching or overlapping duration spans.
@@ -3068,7 +3094,7 @@
       const visibleRangeLeft = Math.min(startX, endX);
       const visibleRangeRight = Math.max(startX, endX);
       if (visibleRangeRight < -40 || visibleRangeLeft > width + 40) return;
-      const showLabel = (importanceRank[event.importance] || 2) >= threshold;
+      let showLabel = (importanceRank[event.importance] || 2) >= threshold;
       const timelinePreview = event.thumbnail || (looksLikeImage(event.media) ? event.media : '');
       const measuredLabelWidth = measureEventLabelWidth(
         event.headline,
@@ -3105,13 +3131,23 @@
 
       let lane = 0;
       if (showLabel) {
-        while (
-          laneEnds[lane] != null &&
-          labelLeft < laneEnds[lane] + 8
-        ) lane++;
-        laneEnds[lane] = labelRight;
-        maxLabelLane = Math.max(maxLabelLane, lane);
+        while (lane < maxLabelLanes) {
+          const intervals = laneIntervals[lane] || [];
+          const collides = intervals.some(interval =>
+            labelLeft < interval.right + 8 && labelRight > interval.left - 8
+          );
+          if (!collides) break;
+          lane++;
+        }
+        if (lane >= maxLabelLanes) {
+          showLabel = false;
+        } else {
+          if (!laneIntervals[lane]) laneIntervals[lane] = [];
+          laneIntervals[lane].push({ left: labelLeft, right: labelRight });
+          maxLabelLane = Math.max(maxLabelLane, lane);
+        }
       }
+      if (!showLabel) recordOverflowEvent(event, x, isAbove);
 
       const labelHeight = 27;
       const laneGap = 34;
@@ -3328,6 +3364,72 @@
     return maxLabelLane + 1;
   }
 
+  function recordOverflowEvent(event, x, isAbove) {
+    if (!Number.isFinite(x) || !event) return;
+    state.pendingOverflow.push({
+      event,
+      x,
+      time: Number(event.start),
+      isAbove: Boolean(isAbove)
+    });
+  }
+
+  function drawOverflowCues(width, height) {
+    if (!state.pendingOverflow.length || isPhoneVerticalMode()) return;
+    const bucketSize = 48;
+    const clusters = new Map();
+
+    for (const item of state.pendingOverflow) {
+      if (item.x < -8 || item.x > width + 8) continue;
+      const bucket = Math.round(item.x / bucketSize);
+      const key = `${item.isAbove ? 'above' : 'below'}:${bucket}`;
+      if (!clusters.has(key)) clusters.set(key, []);
+      clusters.get(key).push(item);
+    }
+
+    for (const items of clusters.values()) {
+      if (!items.length) continue;
+      const x = items.reduce((sum, item) => sum + item.x, 0) / items.length;
+      const time = items.reduce((sum, item) => sum + item.time, 0) / items.length;
+      const isAbove = items[0].isAbove;
+      const cue = document.createElement('button');
+      cue.type = 'button';
+      cue.className = 'timeline-overflow-cue';
+      cue.setAttribute('aria-label', `${items.length} more timeline items near ${formatYear(time)}`);
+      cue.title = `${items.length} more timeline item${items.length === 1 ? '' : 's'}`;
+      cue.style.cssText = [
+        'position:absolute',
+        'width:24px',
+        'height:13px',
+        'padding:0',
+        'margin:0',
+        'border:0',
+        'background:transparent',
+        'cursor:pointer',
+        'z-index:8',
+        `left:${Math.round(Math.max(0, Math.min(width - 24, x - 12)))}px`,
+        `top:${isAbove ? 2 : Math.max(2, height - 15)}px`
+      ].join(';');
+      cue.innerHTML = `<svg viewBox="0 0 24 13" width="24" height="13" aria-hidden="true">
+        <path d="M2 2.5 L12 10.5 L22 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path>
+        <text x="12" y="6.6" text-anchor="middle" dominant-baseline="middle" font-size="7.4" font-weight="700" fill="currentColor">${items.length}</text>
+      </svg>`;
+      cue.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const span = Math.max(MIN_VISIBLE_YEARS, state.viewEnd - state.viewStart);
+        const ratio = Math.max(0, Math.min(1, (time - state.viewStart) / span));
+        zoomAt(ratio, 0.45);
+      });
+      labelLayer.appendChild(cue);
+    }
+  }
+
+  function stickyAxisY(height, rawAxisY = height * state.axisYRatio) {
+    const edge = document.documentElement.dataset.theme === 'dark' ? 1.5 : 1;
+    return Math.max(edge, Math.min(Math.max(edge, height - edge), rawAxisY));
+  }
+
   function mixHex(colorA, colorB, amount) {
     const parse = value => {
       const hex = String(value || '').trim().replace('#', '');
@@ -3341,27 +3443,11 @@
   }
 
   function drawPeriodRows(periods, width, height, axisY, threshold, isAbove, pointLaneCount = 0) {
-    const sorted = [...periods].sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
-    const laneEnds = [];
-    const layout = [];
     const barHeight = 28;
     const laneGap = 36;
     const pointLabelHeight = 27;
     const pointLaneGap = 34;
     const separation = 12;
-
-    for (const event of sorted) {
-      const x1 = timeToX(event.start, width);
-      const x2 = timeToX(event.end, width);
-      const left = Math.min(x1, x2);
-      const right = Math.max(x1, x2);
-      if (right <= 0 || left >= width || right <= left) continue;
-      let lane = 0;
-      while (laneEnds[lane] != null && left < laneEnds[lane] + 8) lane++;
-      laneEnds[lane] = right;
-      layout.push({ event, left, right, lane });
-    }
-    if (!layout.length) return;
 
     const outermostPointTop = pointLaneCount > 0
       ? axisY - 58 - (pointLaneCount - 1) * pointLaneGap
@@ -3369,9 +3455,53 @@
     const outermostPointBottom = pointLaneCount > 0
       ? axisY + 36 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight
       : axisY;
-    let firstPeriodY = isAbove
+    const firstPeriodY = isAbove
       ? Math.min(axisY - 112, outermostPointTop - separation - barHeight)
       : Math.max(axisY + 92, outermostPointBottom + separation);
+
+    let maxPeriodLanes = 0;
+    while (maxPeriodLanes < 64) {
+      const y = isAbove
+        ? firstPeriodY - maxPeriodLanes * laneGap
+        : firstPeriodY + maxPeriodLanes * laneGap;
+      if (y + barHeight <= 2 || y >= height - 2) break;
+      maxPeriodLanes++;
+    }
+
+    const sorted = [...periods].sort((a, b) =>
+      (importanceRank[b.importance] || 2) - (importanceRank[a.importance] || 2) ||
+      a.start - b.start ||
+      String(a.id || '').localeCompare(String(b.id || ''))
+    );
+    const laneIntervals = [];
+    const layout = [];
+
+    for (const event of sorted) {
+      const x1 = timeToX(event.start, width);
+      const x2 = timeToX(event.end, width);
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      if (right <= 0 || left >= width || right <= left) continue;
+
+      let lane = 0;
+      while (lane < maxPeriodLanes) {
+        const intervals = laneIntervals[lane] || [];
+        const collides = intervals.some(interval =>
+          left < interval.right + 8 && right > interval.left - 8
+        );
+        if (!collides) break;
+        lane++;
+      }
+
+      if (lane >= maxPeriodLanes) {
+        recordOverflowEvent(event, Math.max(0, Math.min(width, (left + right) / 2)), isAbove);
+        continue;
+      }
+      if (!laneIntervals[lane]) laneIntervals[lane] = [];
+      laneIntervals[lane].push({ left, right });
+      layout.push({ event, left, right, lane });
+    }
+    if (!layout.length) return;
 
     // Era rows remain anchored to the timeline axis. They may naturally move
     // out of the clipped viewport when the user drags the timeline vertically.
@@ -3948,7 +4078,7 @@
 
     return {
       clientX: rect.left + Math.max(24, Math.min(width - 24, eventX)),
-      clientY: rect.top + Math.max(72, Math.min(rect.height - 72, rect.height * state.axisYRatio))
+      clientY: rect.top + Math.max(24, Math.min(rect.height - 24, stickyAxisY(rect.height)))
     };
   }
 
@@ -4384,11 +4514,20 @@
       const right = ((state.viewEnd - dataMin) / span) * rect.width;
       const clampedLeft = Math.max(0, Math.min(rect.width, left));
       const clampedRight = Math.max(0, Math.min(rect.width, right));
-      // Restore the desktop/iPad top-and-bottom inset after leaving phone
-      // mode; phone mode sets bottom:auto so its height can be controlled.
-      overviewWindow.style.top = '';
-      overviewWindow.style.bottom = '';
-      overviewWindow.style.height = '';
+      // Desktop/tablet radar is two-dimensional: horizontal position follows
+      // the visible time span while the frame's vertical position follows the
+      // canvas's vertical lane pan. This keeps the radar truthful after the axis
+      // itself becomes sticky at a canvas edge.
+      const verticalRange = Math.max(0.0001, DESKTOP_AXIS_MAX_RATIO - DESKTOP_AXIS_MIN_RATIO);
+      const verticalPosition = Math.max(0, Math.min(1,
+        (state.axisYRatio - DESKTOP_AXIS_MIN_RATIO) / verticalRange
+      ));
+      const verticalWindowFraction = 1 / (verticalRange + 1);
+      const verticalWindowHeight = Math.max(10, rect.height * verticalWindowFraction);
+      const verticalTop = (rect.height - verticalWindowHeight) * verticalPosition;
+      overviewWindow.style.top = `${verticalTop}px`;
+      overviewWindow.style.bottom = 'auto';
+      overviewWindow.style.height = `${verticalWindowHeight}px`;
       overviewWindow.style.right = '';
       overviewWindow.style.left = `${clampedLeft}px`;
       overviewWindow.style.width = `${Math.max(8, clampedRight - clampedLeft)}px`;
