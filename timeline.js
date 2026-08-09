@@ -153,6 +153,7 @@
     pendingLeaders: [],
     pendingOverflow: [],
     expandedGroupHeights: new Map(),
+    adaptiveGroupLayout: new Map(),
     groupHeightAnimation: null,
     forcedRevealEventIds: new Set(),
     renderQueued: false,
@@ -3062,63 +3063,105 @@
     return Math.max(GROUP_LANE_HEIGHT, Number(state.expandedGroupHeights.get(category)) || GROUP_LANE_HEIGHT);
   }
 
-  function singleGroupNaturalHeight(category) {
-    const recordCount = state.events.filter(event =>
-      event.elementType !== 'Title' &&
-      state.enabledCategories.has(event.category) &&
-      event.category === category
-    ).length;
-    // With only one group on a side there is no neighboring group to protect,
-    // so remove the preset-height cap. Worst-case one record per packing row
-    // guarantees that the group can reveal everything without an overflow cue.
-    return Math.max(GROUP_LANE_HEIGHT, 54 + Math.max(1, recordCount) * GROUP_LANE_EXPAND_STEP);
+  function computeAdaptiveGroupLayout(width = Math.max(1, viewport.clientWidth || 1)) {
+    const threshold = labelThreshold(state.viewEnd - state.viewStart);
+    const result = new Map();
+    const enabledGroups = [...state.categories.keys()].filter(name => state.enabledCategories.has(name));
+
+    enabledGroups.forEach(category => {
+      const events = state.events.filter(event =>
+        event.elementType !== 'Title' &&
+        event.category === category &&
+        state.enabledCategories.has(event.category)
+      );
+      const points = events.filter(event => event.elementType !== 'Period');
+      const periods = events.filter(event => event.elementType === 'Period' && Number.isFinite(event.end));
+      const rowIntervals = [];
+      const pointRowsById = new Map();
+
+      const sortedPoints = [...points].sort((a, b) =>
+        Number(state.forcedRevealEventIds.has(b.id)) - Number(state.forcedRevealEventIds.has(a.id)) ||
+        (importanceRank[b.importance] || 2) - (importanceRank[a.importance] || 2) ||
+        a.start - b.start || String(a.id || '').localeCompare(String(b.id || ''))
+      );
+
+      sortedPoints.forEach(event => {
+        if ((importanceRank[event.importance] || 2) < threshold) return;
+        const x = timeToX(event.start, width);
+        const preview = event.thumbnail || (looksLikeImage(event.media) ? event.media : '');
+        const measured = measureEventLabelWidth(event.headline, event.importance === 'Major', Boolean(preview));
+        const labelWidth = Math.min(360, Math.max(96, Math.min(measured, Math.max(96, width))));
+        const left = x;
+        const right = left + labelWidth;
+        let row = 0;
+        while (true) {
+          const intervals = rowIntervals[row] || [];
+          if (!intervals.some(interval => left < interval.right + 8 && right > interval.left - 8)) break;
+          row++;
+        }
+        if (!rowIntervals[row]) rowIntervals[row] = [];
+        rowIntervals[row].push({left, right});
+        pointRowsById.set(event.id, row);
+      });
+
+      const periodLaneEnds = [];
+      const periodRowsById = new Map();
+      [...periods].sort((a,b) => a.start-b.start || (a.end||a.start)-(b.end||b.start)).forEach(event => {
+        const left = Math.min(timeToX(event.start, width), timeToX(event.end, width));
+        const right = Math.max(timeToX(event.start, width), timeToX(event.end, width));
+        let row = 0;
+        while (periodLaneEnds[row] != null && left <= periodLaneEnds[row] + 4) row++;
+        periodLaneEnds[row] = right;
+        periodRowsById.set(event.id, row);
+      });
+
+      const pointRows = Math.max(1, rowIntervals.length);
+      const periodRows = periodLaneEnds.length;
+      const compactHeight = Math.max(
+        64,
+        AXIS_BLOCK_CLEARANCE * 2 + pointRows * 34 + (periodRows ? 12 + periodRows * 24 : 0)
+      );
+      const automaticHeight = Math.min(GROUP_LANE_HEIGHT, compactHeight);
+      const explicitHeight = Number(state.expandedGroupHeights.get(category)) || 0;
+      result.set(category, {
+        category,
+        pointRows,
+        periodRows,
+        pointRowsById,
+        periodRowsById,
+        automaticHeight,
+        height: Math.max(automaticHeight, explicitHeight)
+      });
+    });
+
+    state.adaptiveGroupLayout = result;
+    return result;
   }
 
   function groupLaneLayout(axisY) {
-    // Preserve source/config order so groups never jump while panning. A group
-    // starts at the fixed preset height and grows only after its overflow
-    // disclosure control is explicitly activated.
     const enabledGroups = [...state.categories.keys()].filter(name => state.enabledCategories.has(name));
     const primary = enabledGroups.filter(name => isPrimaryCategory(name));
     const reference = enabledGroups.filter(name => !isPrimaryCategory(name));
+    const metrics = computeAdaptiveGroupLayout();
     const bands = new Map();
 
     let primaryCursor = axisY - GROUP_LANE_AXIS_GAP;
     primary.forEach((category, index) => {
-      const laneHeight = primary.length === 1 ? Math.max(groupLaneHeight(category), singleGroupNaturalHeight(category)) : groupLaneHeight(category);
+      const laneHeight = metrics.get(category)?.height || GROUP_LANE_HEIGHT;
       const bottom = primaryCursor;
       const top = bottom - laneHeight;
-      bands.set(category, {
-        category,
-        isAbove: true,
-        index,
-        height: laneHeight,
-        top,
-        bottom,
-        near: bottom,
-        far: top
-      });
+      bands.set(category, { category, isAbove: true, index, height: laneHeight, axisY, top, bottom, near: bottom, far: top });
       primaryCursor = top;
     });
 
     let referenceCursor = axisY + GROUP_LANE_AXIS_GAP;
     reference.forEach((category, index) => {
-      const laneHeight = reference.length === 1 ? Math.max(groupLaneHeight(category), singleGroupNaturalHeight(category)) : groupLaneHeight(category);
+      const laneHeight = metrics.get(category)?.height || GROUP_LANE_HEIGHT;
       const top = referenceCursor;
       const bottom = top + laneHeight;
-      bands.set(category, {
-        category,
-        isAbove: false,
-        index,
-        height: laneHeight,
-        top,
-        bottom,
-        near: top,
-        far: bottom
-      });
+      bands.set(category, { category, isAbove: false, index, height: laneHeight, axisY, top, bottom, near: top, far: bottom });
       referenceCursor = bottom;
     });
-
     return bands;
   }
 
@@ -3136,8 +3179,10 @@
       const visibleBottom = Math.min(height, band.bottom);
       if (visibleBottom <= 0 || visibleTop >= height) continue;
 
-      // Lane interiors are intentionally transparent; only the boundary and
-      // caption identify the group so the canvas hue remains continuous.
+      // A very light group tint provides spatial identity without competing
+      // with the saturated event blocks and connectors.
+      ctx.fillStyle = colorWithAlpha(color, dark ? 0.045 : 0.06);
+      ctx.fillRect(0, visibleTop, width, Math.max(0, visibleBottom - visibleTop));
       const boundaryY = band.isAbove ? band.top : band.bottom;
       if (boundaryY >= 0 && boundaryY <= height) {
         ctx.strokeStyle = colorWithAlpha(color, dark ? 0.24 : 0.18);
@@ -3386,7 +3431,6 @@
             ctx.stroke();
           }
           ctx.restore();
-          state.hitTargets.push({ event, x1: clippedLeft, x2: clippedRight, y1: spanY - 5, y2: spanY + 5 });
         }
       }
 
@@ -3432,8 +3476,6 @@
       );
       ctx.fill();
       ctx.restore();
-      state.hitTargets.push({ event, x1: leaderX - 10, x2: leaderX + 10, y1: spanY - 10, y2: spanY + 10 });
-      state.hitTargets.push({ event, x1: leaderX - 5, x2: leaderX + 5, y1: Math.min(spanY, leaderEndY), y2: Math.max(spanY, leaderEndY) });
 
       if (hasRange) {
         state.pendingEventYears.push({
@@ -4834,53 +4876,37 @@
 
       const verticalGeometry = overviewVerticalGeometry();
       const radarBands = groupLaneLayout(0);
+      const metrics = state.adaptiveGroupLayout;
       const worldToRadarY = worldY =>
         ((worldY - verticalGeometry.contentMin) / Math.max(1, verticalGeometry.contentSpan)) * rect.height;
-      const groupPointIndex = new Map();
-      const groupPointTotals = new Map();
-      points.forEach(event => groupPointTotals.set(event.category, (groupPointTotals.get(event.category) || 0) + 1));
 
       points.forEach(event => {
         const x = ((event.start - dataMin) / span) * rect.width;
         const band = radarBands.get(event.category);
-        if (!band) return;
-        const index = groupPointIndex.get(event.category) || 0;
-        groupPointIndex.set(event.category, index + 1);
-        const maxRows = Math.max(1, Math.floor((band.height - AXIS_BLOCK_CLEARANCE * 2) / 34));
-        const row = index % maxRows;
+        const metric = metrics.get(event.category);
+        if (!band || !metric) return;
+        const row = metric.pointRowsById.get(event.id) ?? 0;
         const worldY = band.isAbove
           ? band.bottom - AXIS_BLOCK_CLEARANCE - 13.5 - row * 34
           : band.top + AXIS_BLOCK_CLEARANCE + 13.5 + row * 34;
         const y = worldToRadarY(worldY);
         overviewCtx.fillStyle = event.color;
-        overviewCtx.fillRect(
-          Math.max(0, Math.min(rect.width - 1, x)),
-          Math.max(0, Math.min(rect.height - 3, y - 2)),
-          2,
-          5
-        );
+        overviewCtx.fillRect(Math.max(0, Math.min(rect.width - 1, x)), Math.max(0, Math.min(rect.height - 3, y - 2)), 2, 5);
       });
 
-      const groupPeriodIndex = new Map();
       periods.forEach(event => {
         const x1 = ((event.start - dataMin) / span) * rect.width;
         const x2 = ((event.end - dataMin) / span) * rect.width;
         const band = radarBands.get(event.category);
-        if (!band) return;
-        const index = groupPeriodIndex.get(event.category) || 0;
-        groupPeriodIndex.set(event.category, index + 1);
-        // Periods sit farther from the axis than point rows, but remain inside
-        // their actual group band and therefore share the lens projection.
-        const offset = Math.min(band.height - 8, AXIS_BLOCK_CLEARANCE + 42 + index * 10);
+        const metric = metrics.get(event.category);
+        if (!band || !metric) return;
+        const row = metric.periodRowsById.get(event.id) ?? 0;
+        const pointSection = metric.pointRows * 34;
+        const offset = AXIS_BLOCK_CLEARANCE + pointSection + 12 + row * 24 + 8;
         const worldY = band.isAbove ? band.bottom - offset : band.top + offset;
         const y = worldToRadarY(worldY);
         overviewCtx.fillStyle = event.color;
-        overviewCtx.fillRect(
-          Math.max(0, Math.min(rect.width, x1)),
-          Math.max(0, Math.min(rect.height - 3, y - 1)),
-          Math.max(1, Math.min(rect.width, x2) - Math.max(0, x1)),
-          3
-        );
+        overviewCtx.fillRect(Math.max(0, Math.min(rect.width, x1)), Math.max(0, Math.min(rect.height - 3, y - 1)), Math.max(1, Math.min(rect.width, x2) - Math.max(0, x1)), 3);
       });
 
       const left = ((state.viewStart - dataMin) / span) * rect.width;

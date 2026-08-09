@@ -45,6 +45,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.6
+
+Made group lanes zoom-adaptive downward: current zoom packing determines the compact lane height, while automatic growth remains capped at the established maximum and overflow continues to use disclosure controls; explicit disclosure expansion can still exceed the cap. Radar vertical positions now consume the same zoom-dependent packing metrics as the main canvas, so lane thickness and miniature event levels update with zoom. Added subtle group-color lane tinting while retaining stronger group colors on blocks/connectors. Restricted detail hit-testing to actual event/period blocks; duration spans, anchor dots, and connector lines no longer open details.
+
 ### 2.8.5
 
 Added direct keyboard panning: arrow keys move the timeline horizontally/vertically, Shift accelerates each step, and native key repeat provides continuous travel while a key is held. Corrected the desktop radar so miniature point/period marks and the viewport lens share the same group/world-Y projection instead of placing event marks in arbitrary decorative rows; radar drag and keyboard/mouse panning now update the same vertical viewport model.
