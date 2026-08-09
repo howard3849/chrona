@@ -5,6 +5,7 @@ on:
     branches: [dev]
     paths:
       - 'tools/patch_chrona_2_8_7.py'
+      - '.github/workflows/run-patch-chrona-2-8-7.yml'
 
 permissions:
   contents: write
