@@ -29,6 +29,7 @@
   const AXIS_STICKY_TOP_INSET = 31;
   const AXIS_STICKY_BOTTOM_INSET = 31;
   const GROUP_LANE_EXPAND_STEP = 34;
+  const AXIS_BLOCK_CLEARANCE = 14;
 
   const DETAILS_ENABLED = true;
 
@@ -177,6 +178,7 @@
     overviewDragging: false,
     overviewDragMode: null,
     overviewDragOffsetRatio: 0,
+    overviewDragOffsetYRatio: 0,
     overviewDragStartRatio: 0,
     overviewDragStartViewStart: 0,
     overviewDragStartViewEnd: 0,
@@ -3060,6 +3062,18 @@
     return Math.max(GROUP_LANE_HEIGHT, Number(state.expandedGroupHeights.get(category)) || GROUP_LANE_HEIGHT);
   }
 
+  function singleGroupNaturalHeight(category) {
+    const recordCount = state.events.filter(event =>
+      event.elementType !== 'Title' &&
+      state.enabledCategories.has(event.category) &&
+      event.category === category
+    ).length;
+    // With only one group on a side there is no neighboring group to protect,
+    // so remove the preset-height cap. Worst-case one record per packing row
+    // guarantees that the group can reveal everything without an overflow cue.
+    return Math.max(GROUP_LANE_HEIGHT, 54 + Math.max(1, recordCount) * GROUP_LANE_EXPAND_STEP);
+  }
+
   function groupLaneLayout(axisY) {
     // Preserve source/config order so groups never jump while panning. A group
     // starts at the fixed preset height and grows only after its overflow
@@ -3071,7 +3085,7 @@
 
     let primaryCursor = axisY - GROUP_LANE_AXIS_GAP;
     primary.forEach((category, index) => {
-      const laneHeight = groupLaneHeight(category);
+      const laneHeight = primary.length === 1 ? Math.max(groupLaneHeight(category), singleGroupNaturalHeight(category)) : groupLaneHeight(category);
       const bottom = primaryCursor;
       const top = bottom - laneHeight;
       bands.set(category, {
@@ -3089,7 +3103,7 @@
 
     let referenceCursor = axisY + GROUP_LANE_AXIS_GAP;
     reference.forEach((category, index) => {
-      const laneHeight = groupLaneHeight(category);
+      const laneHeight = reference.length === 1 ? Math.max(groupLaneHeight(category), singleGroupNaturalHeight(category)) : groupLaneHeight(category);
       const top = referenceCursor;
       const bottom = top + laneHeight;
       bands.set(category, {
@@ -3301,8 +3315,8 @@
       const laneGap = 34;
       const labelTop = band
         ? (isAbove
-          ? band.bottom - 34 - lane * laneGap
-          : band.top + 12 + lane * laneGap)
+          ? band.bottom - AXIS_BLOCK_CLEARANCE - labelHeight - lane * laneGap
+          : band.top + AXIS_BLOCK_CLEARANCE + lane * laneGap)
         : (isAbove ? axisY - 58 - lane * laneGap : axisY + 36 + lane * laneGap);
 
       // Theme-specific attachment geometry:
@@ -3694,10 +3708,10 @@
     const separation = 12;
 
     const outermostPointTop = pointLaneCount > 0
-      ? (band ? band.bottom - 34 - (pointLaneCount - 1) * pointLaneGap : axisY - 58 - (pointLaneCount - 1) * pointLaneGap)
+      ? (band ? band.bottom - AXIS_BLOCK_CLEARANCE - pointLabelHeight - (pointLaneCount - 1) * pointLaneGap : axisY - 58 - (pointLaneCount - 1) * pointLaneGap)
       : (band ? band.bottom : axisY);
     const outermostPointBottom = pointLaneCount > 0
-      ? (band ? band.top + 12 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight : axisY + 36 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight)
+      ? (band ? band.top + AXIS_BLOCK_CLEARANCE + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight : axisY + 36 + (pointLaneCount - 1) * pointLaneGap + pointLabelHeight)
       : (band ? band.top : axisY);
     const firstPeriodY = band
       ? (isAbove
@@ -4552,10 +4566,22 @@
 
   function overviewRatioFromPointer(event) {
     const rect = overviewTrack.getBoundingClientRect();
-    if (isPhoneVerticalMode()) {
-      return Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)));
-    }
+    if (isPhoneVerticalMode()) return Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)));
     return Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
+  }
+
+  function overviewRatiosFromPointer(event) {
+    const rect = overviewTrack.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))),
+      y: Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)))
+    };
+  }
+
+  function moveOverviewWindow2D(xCenterRatio, yCenterRatio) {
+    moveOverviewWindowTo(xCenterRatio);
+    setOverviewVerticalCenterRatio(yCenterRatio);
+    scheduleRender();
   }
 
   function moveOverviewWindowTo(centerRatio) {
@@ -4571,21 +4597,15 @@
     if (!overviewTrack.contains(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
-
-    const trackRect = overviewTrack.getBoundingClientRect();
-    const windowRect = overviewWindow.getBoundingClientRect();
+    const ratios = overviewRatiosFromPointer(event);
     const ratio = overviewRatioFromPointer(event);
+    const windowRect = overviewWindow.getBoundingClientRect();
+    const trackRect = overviewTrack.getBoundingClientRect();
     const bounds = overviewDataBounds();
     const fullSpan = Math.max(0.0001, bounds.max - bounds.min);
     const windowCenterRatio = (((state.viewStart + state.viewEnd) / 2) - bounds.min) / fullSpan;
-    const vertical = isPhoneVerticalMode();
-    const handleZone = vertical ? 18 : 14;
-    const coordinate = vertical ? event.clientY : event.clientX;
-    const startEdge = vertical ? windowRect.top : windowRect.left;
-    const endEdge = vertical ? windowRect.bottom : windowRect.right;
-    const insideWindow = vertical
-      ? event.clientY >= windowRect.top && event.clientY <= windowRect.bottom
-      : event.clientX >= windowRect.left && event.clientX <= windowRect.right;
+    const windowCenterYRatio = ((windowRect.top + windowRect.bottom) / 2 - trackRect.top) / Math.max(1, trackRect.height);
+    const verticalPhone = isPhoneVerticalMode();
 
     overviewTrack.setPointerCapture?.(event.pointerId);
     state.overviewDragging = true;
@@ -4593,30 +4613,37 @@
     state.overviewDragStartViewStart = state.viewStart;
     state.overviewDragStartViewEnd = state.viewEnd;
 
-    // Detect handles from actual geometry, not fragile DOM/pseudo-element targeting.
-    if (Math.abs(coordinate - startEdge) <= handleZone) {
-      state.overviewDragMode = 'left';
-      return;
-    }
-    if (Math.abs(coordinate - endEdge) <= handleZone) {
-      state.overviewDragMode = 'right';
-      return;
-    }
-    if (insideWindow) {
+    if (verticalPhone) {
+      const handleZone = 18;
+      if (Math.abs(event.clientY - windowRect.top) <= handleZone) { state.overviewDragMode = 'left'; return; }
+      if (Math.abs(event.clientY - windowRect.bottom) <= handleZone) { state.overviewDragMode = 'right'; return; }
+      const inside = event.clientY >= windowRect.top && event.clientY <= windowRect.bottom;
       state.overviewDragMode = 'pan';
-      state.overviewDragOffsetRatio = ratio - windowCenterRatio;
+      state.overviewDragOffsetRatio = inside ? ratio - windowCenterRatio : 0;
+      if (!inside) moveOverviewWindowTo(ratio);
       return;
     }
 
-    state.overviewDragMode = 'pan';
-    state.overviewDragOffsetRatio = 0;
-    moveOverviewWindowTo(ratio);
+    const handleZone = 14;
+    if (Math.abs(event.clientX - windowRect.left) <= handleZone && event.clientY >= windowRect.top && event.clientY <= windowRect.bottom) { state.overviewDragMode = 'left'; return; }
+    if (Math.abs(event.clientX - windowRect.right) <= handleZone && event.clientY >= windowRect.top && event.clientY <= windowRect.bottom) { state.overviewDragMode = 'right'; return; }
+
+    const inside = event.clientX >= windowRect.left && event.clientX <= windowRect.right && event.clientY >= windowRect.top && event.clientY <= windowRect.bottom;
+    state.overviewDragMode = 'pan2d';
+    state.overviewDragOffsetRatio = inside ? ratios.x - windowCenterRatio : 0;
+    state.overviewDragOffsetYRatio = inside ? ratios.y - windowCenterYRatio : 0;
+    if (!inside) moveOverviewWindow2D(ratios.x, ratios.y);
   }
 
   function onOverviewPointerMove(event) {
     if (!state.overviewDragging) return;
     event.preventDefault();
+    const ratios = overviewRatiosFromPointer(event);
     const ratio = overviewRatioFromPointer(event);
+    if (state.overviewDragMode === 'pan2d') {
+      moveOverviewWindow2D(ratios.x - state.overviewDragOffsetRatio, ratios.y - state.overviewDragOffsetYRatio);
+      return;
+    }
     if (state.overviewDragMode === 'pan') {
       moveOverviewWindowTo(ratio - state.overviewDragOffsetRatio);
       return;
@@ -4624,12 +4651,14 @@
 
     const bounds = overviewDataBounds();
     const fullSpan = Math.max(0.0001, bounds.max - bounds.min);
-    const minSpan = Math.min(fullSpan, Math.max(MIN_VISIBLE_YEARS, fullSpan * 0.002));
-    const pointerTime = bounds.min + ratio * fullSpan;
+    const start = state.overviewDragStartViewStart;
+    const end = state.overviewDragStartViewEnd;
     if (state.overviewDragMode === 'left') {
-      state.viewStart = Math.max(bounds.min, Math.min(pointerTime, state.viewEnd - minSpan));
+      const nextStart = Math.min(end - MIN_VISIBLE_YEARS, bounds.min + ratio * fullSpan);
+      clampView(nextStart, end);
     } else if (state.overviewDragMode === 'right') {
-      state.viewEnd = Math.min(bounds.max, Math.max(pointerTime, state.viewStart + minSpan));
+      const nextEnd = Math.max(start + MIN_VISIBLE_YEARS, bounds.min + ratio * fullSpan);
+      clampView(start, nextEnd);
     }
     scheduleRender();
   }
@@ -4639,6 +4668,7 @@
     state.overviewDragging = false;
     state.overviewDragMode = null;
     state.overviewDragOffsetRatio = 0;
+    state.overviewDragOffsetYRatio = 0;
     overviewTrack.releasePointerCapture?.(event.pointerId);
   }
 
@@ -4656,6 +4686,36 @@
     let end = start + nextSpan;
     clampView(start, end);
     scheduleRender();
+  }
+
+  function overviewVerticalGeometry() {
+    const viewportHeight = Math.max(1, viewport.getBoundingClientRect().height);
+    const contentBands = groupLaneLayout(0);
+    let contentMin = -AXIS_STICKY_TOP_INSET;
+    let contentMax = AXIS_STICKY_BOTTOM_INSET;
+    for (const band of contentBands.values()) {
+      contentMin = Math.min(contentMin, band.top);
+      contentMax = Math.max(contentMax, band.bottom);
+    }
+    const contentSpan = Math.max(1, contentMax - contentMin);
+    const availableTravel = Math.max(0, contentSpan - viewportHeight);
+    const visibleTop = -viewportHeight * state.axisYRatio;
+    const clampedVisibleTop = availableTravel > 0
+      ? Math.max(contentMin, Math.min(contentMax - viewportHeight, visibleTop))
+      : contentMin;
+    return { viewportHeight, contentMin, contentMax, contentSpan, availableTravel, visibleTop: clampedVisibleTop };
+  }
+
+  function setOverviewVerticalCenterRatio(centerRatio) {
+    const geometry = overviewVerticalGeometry();
+    if (geometry.availableTravel <= 0) return;
+    const lensFraction = Math.min(1, geometry.viewportHeight / geometry.contentSpan);
+    const halfLens = lensFraction / 2;
+    const clampedCenter = Math.max(halfLens, Math.min(1 - halfLens, centerRatio));
+    const topRatio = (clampedCenter - halfLens) / Math.max(0.0001, 1 - lensFraction);
+    const visibleTop = geometry.contentMin + topRatio * geometry.availableTravel;
+    state.axisYRatio = Math.max(DESKTOP_AXIS_MIN_RATIO, Math.min(DESKTOP_AXIS_MAX_RATIO, -visibleTop / geometry.viewportHeight));
+    localStorage.setItem('chrona-axis-y-ratio', String(state.axisYRatio));
   }
 
   function drawOverview() {
@@ -4766,31 +4826,15 @@
       const right = ((state.viewEnd - dataMin) / span) * rect.width;
       const clampedLeft = Math.max(0, Math.min(rect.width, left));
       const clampedRight = Math.max(0, Math.min(rect.width, right));
-      // Radar vertical geometry uses the same world coordinate system as the
-      // group layout. The content axis is world y=0; vertical panning changes
-      // which world-y interval is visible. Sticky-axis clamping is irrelevant.
-      const viewportHeight = Math.max(1, viewport.getBoundingClientRect().height);
-      const contentBands = groupLaneLayout(0);
-      let contentMin = -AXIS_STICKY_TOP_INSET;
-      let contentMax = AXIS_STICKY_BOTTOM_INSET;
-      for (const band of contentBands.values()) {
-        contentMin = Math.min(contentMin, band.top);
-        contentMax = Math.max(contentMax, band.bottom);
-      }
-
-      const contentSpan = Math.max(1, contentMax - contentMin);
-      const visibleTop = -viewportHeight * state.axisYRatio;
-      const availableTravel = Math.max(0, contentSpan - viewportHeight);
-      const lensFraction = Math.min(1, viewportHeight / contentSpan);
+      // Radar lens is a miniature of the actual vertically scrollable content.
+      const vertical = overviewVerticalGeometry();
+      const lensFraction = Math.min(1, vertical.viewportHeight / vertical.contentSpan);
       const verticalWindowHeight = Math.max(10, rect.height * lensFraction);
-
       let verticalTop = 0;
-      if (availableTravel > 0) {
-        const clampedVisibleTop = Math.max(contentMin, Math.min(contentMax - viewportHeight, visibleTop));
-        const scrollRatio = (clampedVisibleTop - contentMin) / availableTravel;
+      if (vertical.availableTravel > 0) {
+        const scrollRatio = (vertical.visibleTop - vertical.contentMin) / vertical.availableTravel;
         verticalTop = (rect.height - verticalWindowHeight) * scrollRatio;
       }
-
       overviewWindow.style.top = `${verticalTop}px`;
       overviewWindow.style.bottom = 'auto';
       overviewWindow.style.height = `${verticalWindowHeight}px`;

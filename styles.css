@@ -5953,3 +5953,7 @@ html[data-preview-size="tablet"] .settings-panel.settings-panel-compact {
   pointer-events: auto !important;
   touch-action: manipulation;
 }
+
+/* Chrona v2.8.4 — radar lens is draggable in both axes. */
+.overview-window { cursor: move; }
+.overview-window:active { cursor: grabbing; }

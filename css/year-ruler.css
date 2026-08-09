@@ -1,5 +1,6 @@
 /* Chrona year ruler: desktop vertical, phone horizontal. */
 .year-cursor {
+  --cursor-label-gap: 7px;
   position: absolute;
   z-index: 36;
   pointer-events: none;
@@ -35,10 +36,10 @@
   bottom: auto;
 }
 .timeline-viewport:not(.is-phone-vertical) .year-cursor-label {
-  right: 7px;
-  transform: translateX(-100%);
+  right: var(--cursor-label-gap);
+  transform: none;
 }
-.timeline-viewport:not(.is-phone-vertical) .year-cursor-relative { left: 7px; }
+.timeline-viewport:not(.is-phone-vertical) .year-cursor-relative { left: var(--cursor-label-gap); }
 
 /* Phone: labels sit at the right endpoint, year above and relative age below. */
 .timeline-viewport.is-phone-vertical .year-cursor {

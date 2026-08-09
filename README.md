@@ -45,6 +45,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.4
+
+Made a single enabled group on either side of the axis auto-expand without the preset lane-height restriction, added symmetric axis-facing block clearance, corrected the yellow cursor year/relative-label spacing to use one shared gap, and upgraded the desktop/tablet radar lens to true 2D navigation: drag vertically or diagonally to move through timeline groups, click empty radar space to jump in both dimensions, while left/right lens edges continue controlling time zoom.
+
 ### 2.8.3
 
 Fixed cluster disclosure interaction so overflow controls capture pointer input and cannot click through to hidden/underlying events; clicking a disclosure now reaches the animated group-expansion path reliably. Reworked radar vertical mapping to use the actual group-content world extent and the visible canvas world window rather than a synthetic navigation envelope. Moved group-lane captions to an unfaded structural overlay so viewport edge fades affect timeline content but not group identity labels.
