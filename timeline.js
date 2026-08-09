@@ -821,6 +821,15 @@
     yearCursor.hidden = true;
     scheduleRender();
   };
+  zoomRail?.addEventListener('wheel', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    hideYearCursor();
+    if (!event.deltaY) return;
+    // Fine continuous zoom for MacBook trackpads and mouse wheels. Up zooms in,
+    // down zooms out, centered on the current viewport.
+    zoomAt(0.5, Math.exp(event.deltaY * 0.0025));
+  }, { passive: false });
   zoomRail?.addEventListener('pointerenter', hideYearCursor);
   zoomRail?.addEventListener('pointermove', hideYearCursor);
   zoomRail?.addEventListener('pointerdown', event => {
@@ -1880,32 +1889,74 @@
   }
 
   function resetView() {
-    // Reset can be invoked immediately after a drag or captured pointer sequence.
-    // Clear all interaction state after reset.
     clearPointerInteraction();
     state.tooltipPinned = false;
     tooltip.classList.remove('is-pinned');
     tooltip.hidden = true;
     state.tooltipToken++;
+    state.expandedGroupHeights.clear();
+    state.forcedRevealEventIds.clear();
+    if (!detailPanel.hidden) closeDetails();
 
     const points = state.events
-      .filter(event => event.visible && event.elementType !== 'Period' && Number.isFinite(event.start))
+      .filter(event =>
+        event.visible &&
+        event.elementType !== 'Period' &&
+        Number.isFinite(event.start) &&
+        state.enabledCategories.has(event.category)
+      )
       .map(event => event.start)
       .sort((a, b) => a - b);
 
-    if (points.length >= 4) {
-      // Focus the initial view on the central 90% of point events. Long reference
-      // periods and isolated ancient events remain visible in the overview navigator.
-      const lower = quantile(points, 0.05);
-      const upper = quantile(points, 0.95);
-      const contentSpan = Math.max(1, upper - lower);
-      const pad = Math.max(2, contentSpan * 0.08);
-      state.viewStart = lower - pad;
-      state.viewEnd = upper + pad;
-    } else {
+    if (!points.length) {
       showFullExtent(false);
+      state.axisYRatio = DEFAULT_AXIS_Y_RATIO;
+      localStorage.setItem('chrona-axis-y-ratio', String(state.axisYRatio));
+      scheduleRender();
       return;
     }
+
+    const candidateSpans = [250, 500, 1000];
+    const targetCount = Math.min(points.length, Math.max(4, Math.ceil(points.length * 0.62)));
+    let chosen = null;
+
+    for (const span of candidateSpans) {
+      let left = 0;
+      let bestLeft = 0;
+      let bestRight = 0;
+      for (let right = 0; right < points.length; right++) {
+        while (points[right] - points[left] > span && left < right) left++;
+        if (right - left > bestRight - bestLeft) {
+          bestLeft = left;
+          bestRight = right;
+        }
+      }
+      const count = bestRight - bestLeft + 1;
+      const center = (points[bestLeft] + points[bestRight]) / 2;
+      chosen = { span, count, center };
+      if (count >= targetCount) break;
+    }
+
+    const span = chosen?.span || 1000;
+    const center = chosen?.center ?? points[Math.floor(points.length / 2)];
+    clampView(center - span / 2, center + span / 2);
+
+    // Center the currently active vertical stack, not an arbitrary axis ratio.
+    const viewportHeight = Math.max(1, viewport.clientHeight || window.innerHeight || 1);
+    const bands = groupLaneLayout(0);
+    let contentMin = 0;
+    let contentMax = 0;
+    for (const band of bands.values()) {
+      contentMin = Math.min(contentMin, band.top);
+      contentMax = Math.max(contentMax, band.bottom);
+    }
+    const contentCenter = (contentMin + contentMax) / 2;
+    const rawAxisY = viewportHeight / 2 - contentCenter;
+    state.axisYRatio = Math.max(
+      DESKTOP_AXIS_MIN_RATIO,
+      Math.min(DESKTOP_AXIS_MAX_RATIO, rawAxisY / viewportHeight)
+    );
+    localStorage.setItem('chrona-axis-y-ratio', String(state.axisYRatio));
     scheduleRender();
   }
 
@@ -2194,11 +2245,30 @@
     }, null)?.event || null;
   }
 
-  function listDateMarkup(event) {
-    const display = localizedDisplayDate(event) || event.displayDate || formatYear(event.start);
+  function listDateMarkup(event, showYear = true) {
     const year = formatYear(event.start);
-    const secondary = display === year ? '' : `<span>${escapeHtml(display)}</span>`;
-    return `<strong>${escapeHtml(year)}</strong>${secondary}`;
+    let display = localizedDisplayDate(event) || event.displayDate || year;
+    const startYear = String(event.sourceYear || Math.floor(Number(event.start)));
+    const endYear = String(event.sourceEndYear || '');
+
+    if (state.language === 'zh-TW' || state.language === 'zh-CN') {
+      display = display.replace(`${startYear}年`, '');
+      if (!endYear || endYear === startYear) display = display.replaceAll(`${startYear}年`, '');
+    } else if (state.language.startsWith('en')) {
+      display = display.replaceAll(`, ${startYear}`, '').replaceAll(` ${startYear}`, '');
+      if (endYear && endYear !== startYear) {
+        // Preserve a cross-year endpoint if the broad replacement removed it.
+        const endToken = String(event.sourceEndYear || '');
+        if (endToken && !display.includes(endToken)) display = `${display}–${endToken}`;
+      }
+    }
+
+    display = compactCjkLatinSpacing(display).trim();
+    const secondary = !display || display === year ? '' : `<span>${escapeHtml(display)}</span>`;
+    const heading = showYear
+      ? `<strong>${escapeHtml(year)}</strong>`
+      : '<strong class="is-repeated-year" aria-hidden="true"></strong>';
+    return `${heading}${secondary}`;
   }
 
   function renderListView(reanchor = false) {
@@ -2207,7 +2277,11 @@
     listViewSummary.textContent = `${events.length} event${events.length === 1 ? '' : 's'} · ${state.enabledCategories.size} visible group${state.enabledCategories.size === 1 ? '' : 's'}`;
     listViewItems.replaceChildren();
     const fragment = document.createDocumentFragment();
+    let previousListYear = null;
     for (const event of events) {
+      const listYear = formatYear(event.start);
+      const showListYear = listYear !== previousListYear;
+      previousListYear = listYear;
       const row = document.createElement('article');
       const searchClass = state.searchQuery.trim()
         ? (isActiveSearchResult(event) ? ' is-search-match' : (eventMatchesSearch(event) ? ' is-search-result' : ' is-search-dim'))
@@ -2216,7 +2290,7 @@
       row.dataset.eventId = event.id;
       row.style.setProperty('--event-color', event.color);
       row.innerHTML = `
-        <div class="list-view-date">${listDateMarkup(event)}</div>
+        <div class="list-view-date">${listDateMarkup(event, showListYear)}</div>
         <div class="list-view-rail" aria-hidden="true"><i></i></div>
         <button class="list-view-card" type="button">
           <span class="list-view-card-title">${escapeHtml(event.headline)}</span>
@@ -3067,8 +3141,15 @@
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
     const result = new Map();
     const enabledGroups = [...state.categories.keys()].filter(name => state.enabledCategories.has(name));
+    const primaryGroups = enabledGroups.filter(name => isPrimaryCategory(name));
+    const referenceGroups = enabledGroups.filter(name => !isPrimaryCategory(name));
+    const visualTheme = document.documentElement.dataset.visualTheme || 'gradient';
+    const isMetroTheme = visualTheme === 'metro';
 
     enabledGroups.forEach(category => {
+      const soleSide = isPrimaryCategory(category)
+        ? primaryGroups.length === 1
+        : referenceGroups.length === 1;
       const events = state.events.filter(event =>
         event.elementType !== 'Title' &&
         event.category === category &&
@@ -3086,13 +3167,16 @@
       );
 
       sortedPoints.forEach(event => {
-        if ((importanceRank[event.importance] || 2) < threshold) return;
+        // A sole group reveals all of its visible records. Multi-group layouts
+        // retain the Importance threshold and overflow behavior at wide zooms.
+        if (!soleSide && (importanceRank[event.importance] || 2) < threshold) return;
         const x = timeToX(event.start, width);
         const preview = event.thumbnail || (looksLikeImage(event.media) ? event.media : '');
         const measured = measureEventLabelWidth(event.headline, event.importance === 'Major', Boolean(preview));
         const labelWidth = Math.min(360, Math.max(96, Math.min(measured, Math.max(96, width))));
-        const left = x;
+        const left = isMetroTheme ? x - 1 : x;
         const right = left + labelWidth;
+        if (right <= 0 || left >= width) return;
         let row = 0;
         while (true) {
           const intervals = rowIntervals[row] || [];
@@ -3100,35 +3184,47 @@
           row++;
         }
         if (!rowIntervals[row]) rowIntervals[row] = [];
-        rowIntervals[row].push({left, right});
+        rowIntervals[row].push({ left, right });
         pointRowsById.set(event.id, row);
       });
 
       const periodLaneEnds = [];
       const periodRowsById = new Map();
-      [...periods].sort((a,b) => a.start-b.start || (a.end||a.start)-(b.end||b.start)).forEach(event => {
+      [...periods].sort((a, b) => a.start - b.start || (a.end || a.start) - (b.end || b.start)).forEach(event => {
         const left = Math.min(timeToX(event.start, width), timeToX(event.end, width));
         const right = Math.max(timeToX(event.start, width), timeToX(event.end, width));
+        if (right < 0 || left > width) return;
         let row = 0;
         while (periodLaneEnds[row] != null && left <= periodLaneEnds[row] + 4) row++;
         periodLaneEnds[row] = right;
         periodRowsById.set(event.id, row);
       });
 
-      const pointRows = Math.max(1, rowIntervals.length);
+      const pointRows = rowIntervals.length;
       const periodRows = periodLaneEnds.length;
-      const compactHeight = Math.max(
-        64,
-        AXIS_BLOCK_CLEARANCE * 2 + pointRows * 34 + (periodRows ? 12 + periodRows * 24 : 0)
-      );
-      const automaticHeight = Math.min(GROUP_LANE_HEIGHT, compactHeight);
-      const explicitHeight = Number(state.expandedGroupHeights.get(category)) || 0;
+      let requiredHeight;
+      if (!pointRows && !periodRows) {
+        requiredHeight = 34;
+      } else {
+        let used = AXIS_BLOCK_CLEARANCE;
+        if (pointRows) used += 27 + (pointRows - 1) * 34;
+        if (periodRows) used += 12 + 28 + (periodRows - 1) * 36;
+        used += pointRows && !periodRows ? AXIS_BLOCK_CLEARANCE : 4;
+        requiredHeight = Math.max(34, Math.ceil(used));
+      }
+
+      const automaticHeight = soleSide
+        ? requiredHeight
+        : Math.min(GROUP_LANE_HEIGHT, requiredHeight);
+      const explicitHeight = soleSide ? 0 : (Number(state.expandedGroupHeights.get(category)) || 0);
       result.set(category, {
         category,
+        soleSide,
         pointRows,
         periodRows,
         pointRowsById,
         periodRowsById,
+        requiredHeight,
         automaticHeight,
         height: Math.max(automaticHeight, explicitHeight)
       });
@@ -3147,19 +3243,27 @@
 
     let primaryCursor = axisY - GROUP_LANE_AXIS_GAP;
     primary.forEach((category, index) => {
-      const laneHeight = metrics.get(category)?.height || GROUP_LANE_HEIGHT;
+      const metric = metrics.get(category);
+      const laneHeight = metric?.height || 34;
       const bottom = primaryCursor;
       const top = bottom - laneHeight;
-      bands.set(category, { category, isAbove: true, index, height: laneHeight, axisY, top, bottom, near: bottom, far: top });
+      bands.set(category, {
+        category, isAbove: true, index, height: laneHeight, axisY,
+        soleSide: Boolean(metric?.soleSide), top, bottom, near: bottom, far: top
+      });
       primaryCursor = top;
     });
 
     let referenceCursor = axisY + GROUP_LANE_AXIS_GAP;
     reference.forEach((category, index) => {
-      const laneHeight = metrics.get(category)?.height || GROUP_LANE_HEIGHT;
+      const metric = metrics.get(category);
+      const laneHeight = metric?.height || 34;
       const top = referenceCursor;
       const bottom = top + laneHeight;
-      bands.set(category, { category, isAbove: false, index, height: laneHeight, axisY, top, bottom, near: top, far: bottom });
+      bands.set(category, {
+        category, isAbove: false, index, height: laneHeight, axisY,
+        soleSide: Boolean(metric?.soleSide), top, bottom, near: top, far: bottom
+      });
       referenceCursor = bottom;
     });
     return bands;
@@ -3183,15 +3287,7 @@
       // with the saturated event blocks and connectors.
       ctx.fillStyle = colorWithAlpha(color, dark ? 0.045 : 0.06);
       ctx.fillRect(0, visibleTop, width, Math.max(0, visibleBottom - visibleTop));
-      const boundaryY = band.isAbove ? band.top : band.bottom;
-      if (boundaryY >= 0 && boundaryY <= height) {
-        ctx.strokeStyle = colorWithAlpha(color, dark ? 0.24 : 0.18);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, Math.round(boundaryY) + 0.5);
-        ctx.lineTo(width, Math.round(boundaryY) + 0.5);
-        ctx.stroke();
-      }
+      // No darker frame: adjacent lane tints define the group boundary.
 
       const captionY = band.isAbove ? band.top + 6 : band.bottom - 18;
       if (captionY >= -2 && captionY <= height - 8) {
@@ -3301,7 +3397,7 @@
       const visibleRangeLeft = Math.min(startX, endX);
       const visibleRangeRight = Math.max(startX, endX);
       if (visibleRangeRight < -40 || visibleRangeLeft > width + 40) return;
-      let showLabel = (importanceRank[event.importance] || 2) >= threshold;
+      let showLabel = Boolean(band?.soleSide) || (importanceRank[event.importance] || 2) >= threshold;
       const timelinePreview = event.thumbnail || (looksLikeImage(event.media) ? event.media : '');
       const measuredLabelWidth = measureEventLabelWidth(
         event.headline,
@@ -3656,6 +3752,7 @@
     const clusters = new Map();
 
     for (const item of state.pendingOverflow) {
+      if (state.adaptiveGroupLayout.get(item.category)?.soleSide) continue;
       if (item.x < -8 || item.x > width + 8) continue;
       if (!Number.isFinite(item.boundaryY)) continue;
       const bucket = Math.round(item.x / bucketSize);
@@ -4033,12 +4130,14 @@
 
   function drawLeaderLines(axisY) {
     if (!state.pendingLeaders.length) return;
+    const height = Math.max(1, viewport.getBoundingClientRect().height);
+    const rawAxisY = height * state.axisYRatio;
+    const stickyTop = rawAxisY < AXIS_STICKY_TOP_INSET;
+    const stickyBottom = rawAxisY > height - AXIS_STICKY_BOTTOM_INSET;
 
-    // Opaque themes place this canvas behind the DOM labels, so each front
-    // block naturally masks connectors belonging to events behind it. Metro
-    // places it above transparent labels so neighboring connectors remain
-    // visible through them.
     for (const leader of state.pendingLeaders) {
+      const belongsAbove = isPrimaryCategory(leader.event.category);
+      if ((stickyTop && belongsAbove) || (stickyBottom && !belongsAbove)) continue;
       leaderCtx.save();
       leaderCtx.strokeStyle = colorWithAlpha(leader.event.color, 1);
       leaderCtx.lineWidth = 2;

@@ -45,6 +45,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.7
+
+Refined Home/Reset to choose a dense enabled-event window at a practical 250/500/1000-year span and vertically center the active stack. Trackpad/wheel input over the zoom rail now performs fine continuous zoom instead of panning the timeline. Adaptive group lanes now use only currently intersecting content: empty groups collapse to a label strip, one-row groups stay compact, multi-group lanes cap at the normal maximum, and a sole group on one side expands enough to reveal all visible records without overflow controls. Removed darker lane borders. Chronological List now shows each year heading once and uses month/day detail for subsequent same-year entries. All connector lines render behind event/period blocks, and connectors from the scrolled-away side are suppressed while the axis is sticky at the top or bottom.
+
 ### 2.8.6
 
 Made group lanes zoom-adaptive downward: current zoom packing determines the compact lane height, while automatic growth remains capped at the established maximum and overflow continues to use disclosure controls; explicit disclosure expansion can still exceed the cap. Radar vertical positions now consume the same zoom-dependent packing metrics as the main canvas, so lane thickness and miniature event levels update with zoom. Added subtle group-color lane tinting while retaining stronger group colors on blocks/connectors. Restricted detail hit-testing to actual event/period blocks; duration spans, anchor dots, and connector lines no longer open details.

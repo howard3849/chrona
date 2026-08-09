@@ -203,7 +203,7 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
 .timeline-viewport:focus { box-shadow: inset 0 0 0 2px var(--focus); }
 #timelineCanvas, .label-layer, .leader-canvas, .axis-canvas, .axis-label-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
 .label-layer { pointer-events: none; overflow: hidden; z-index: 2; }
-.leader-canvas { pointer-events: none; z-index: 1; }
+.leader-canvas { pointer-events: none; z-index: 0; }
 .axis-canvas { pointer-events: none; z-index: 5; }
 .axis-label-layer { pointer-events: none; overflow: hidden; z-index: 5; }
 
@@ -5957,3 +5957,10 @@ html[data-preview-size="tablet"] .settings-panel.settings-panel-compact {
 /* Chrona v2.8.4 — radar lens is draggable in both axes. */
 .overview-window { cursor: move; }
 .overview-window:active { cursor: grabbing; }
+
+
+/* Chrona v2.8.7 — connector and chronological-list layering. */
+#timelineCanvas { z-index: 1; }
+.event-label-above:not(.period-label)::before,
+.event-label-below:not(.period-label)::before { display: none !important; }
+.list-view-date strong.is-repeated-year { visibility: hidden; }
