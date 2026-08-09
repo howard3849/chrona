@@ -221,3 +221,5 @@ assert 'const worldToRadarY = worldY =>' in final_js
 assert 'const vertical = verticalGeometry;' in final_js
 assert 'v2.8.5' in index_path.read_text() and '?v=2.8.5' in index_path.read_text()
 print('Chrona 2.8.5 patch applied')
+
+# trigger
