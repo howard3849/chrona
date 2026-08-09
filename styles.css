@@ -202,6 +202,7 @@ main { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; ove
 }
 .timeline-viewport:focus { box-shadow: inset 0 0 0 2px var(--focus); }
 #timelineCanvas, .label-layer, .leader-canvas, .axis-canvas, .axis-label-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
+#timelineCanvas { z-index: 1; }
 .label-layer { pointer-events: none; overflow: hidden; z-index: 2; }
 .leader-canvas { pointer-events: none; z-index: 0; }
 .axis-canvas { pointer-events: none; z-index: 5; }
@@ -5964,3 +5965,59 @@ html[data-preview-size="tablet"] .settings-panel.settings-panel-compact {
 .event-label-above:not(.period-label)::before,
 .event-label-below:not(.period-label)::before { display: none !important; }
 .list-view-date strong.is-repeated-year { visibility: hidden; }
+
+
+/* Chrona 2.8.8 — lane-keeping / mixed-group presentation switch */
+.visible-sets-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.lane-keeping-control {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  user-select: none;
+}
+.lane-keeping-control input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.lane-keeping-control i {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent);
+  box-shadow: inset 0 1px 2px rgba(15,23,42,.08);
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.lane-keeping-control i::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: var(--surface-solid);
+  box-shadow: 0 1px 3px rgba(15,23,42,.25);
+  transition: transform 150ms ease;
+}
+.lane-keeping-control input:checked + i {
+  background: #34c759;
+  border-color: color-mix(in srgb, #34c759 72%, var(--border-strong));
+}
+.lane-keeping-control input:checked + i::after { transform: translateX(14px); }
+.lane-keeping-control input:focus-visible + i { box-shadow: 0 0 0 3px var(--focus); }
+@media (max-width: 760px) {
+  .lane-keeping-control span { display: none; }
+}

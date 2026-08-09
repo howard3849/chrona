@@ -45,6 +45,12 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.8
+- Added a persistent Lane-keeping toggle beside the visible-group pills. Off restores compact mixed-group packing; on keeps separated group lanes.
+- Fixed adaptive lane sizing so one visible row always receives one render row and stale cluster expansion no longer leaves oversized empty lanes after zoom/pan changes.
+- Treat event blocks, leaders, dots, spans, and event-year labels as one render bundle: if the block is hidden, overflowed, or suppressed at a sticky edge, its anchor artifacts are also hidden.
+- Put the timeline block canvas physically above the leader canvas so unrelated connector lines cannot cut through period/event blocks.
+
 ### 2.8.7
 
 Refined Home/Reset to choose a dense enabled-event window at a practical 250/500/1000-year span and vertically center the active stack. Trackpad/wheel input over the zoom rail now performs fine continuous zoom instead of panning the timeline. Adaptive group lanes now use only currently intersecting content: empty groups collapse to a label strip, one-row groups stay compact, multi-group lanes cap at the normal maximum, and a sole group on one side expands enough to reveal all visible records without overflow controls. Removed darker lane borders. Chronological List now shows each year heading once and uses month/day detail for subsequent same-year entries. All connector lines render behind event/period blocks, and connectors from the scrolled-away side are suppressed while the axis is sticky at the top or bottom.

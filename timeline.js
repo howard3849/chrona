@@ -15,6 +15,7 @@
   const LANGUAGE_STORAGE_KEY = 'chrona-language';
   const TRANSLATION_CACHE_KEY = 'chrona-translation-cache-v1';
   const TRANSLATION_SESSION_KEY = 'chrona-translation-session-v1';
+  const LANE_KEEPING_STORAGE_KEY = 'chrona-lane-keeping';
   const DEFAULT_AXIS_Y_RATIO = 0.47;
   // Desktop timelines can require substantial vertical travel when several
   // point and period lanes sit on the same side of the axis. Keep the axis
@@ -109,12 +110,14 @@
   const listViewScroller = document.getElementById('listViewScroller');
   const listViewItems = document.getElementById('listViewItems');
   const listViewSummary = document.getElementById('listViewSummary');
+  const laneKeepingToggle = document.getElementById('laneKeepingToggle');
 
   const state = {
     events: [],
     categories: new Map(),
     enabledCategories: new Set(),
     aboveGroups: new Set(),
+    laneKeeping: localStorage.getItem(LANE_KEEPING_STORAGE_KEY) !== 'false',
     language: localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'en-US',
     baselineLanguage: 'en',
     availableLanguages: ['en'],
@@ -728,6 +731,21 @@
   const savedVisualTheme = localStorage.getItem('chrona-visual-theme') || 'gradient';
   applyTheme(savedTheme);
   applyVisualTheme(savedVisualTheme);
+  function syncLaneKeepingToggle() {
+    if (!laneKeepingToggle) return;
+    laneKeepingToggle.checked = Boolean(state.laneKeeping);
+    laneKeepingToggle.setAttribute('aria-checked', String(state.laneKeeping));
+    document.documentElement.dataset.laneKeeping = state.laneKeeping ? 'on' : 'off';
+  }
+  syncLaneKeepingToggle();
+  laneKeepingToggle?.addEventListener('change', () => {
+    state.laneKeeping = Boolean(laneKeepingToggle.checked);
+    localStorage.setItem(LANE_KEEPING_STORAGE_KEY, String(state.laneKeeping));
+    state.expandedGroupHeights.clear();
+    state.forcedRevealEventIds.clear();
+    syncLaneKeepingToggle();
+    scheduleRender();
+  });
   themeButtons.forEach(button => button.addEventListener('click', () => applyTheme(button.dataset.themeValue)));
   visualThemeButtons.forEach(button => button.addEventListener('click', () => applyVisualTheme(button.dataset.visualThemeValue)));
   settingsToggle.addEventListener('click', () => toggleSettings());
@@ -3216,7 +3234,7 @@
       const automaticHeight = soleSide
         ? requiredHeight
         : Math.min(GROUP_LANE_HEIGHT, requiredHeight);
-      const explicitHeight = soleSide ? 0 : (Number(state.expandedGroupHeights.get(category)) || 0);
+      const explicitHeight = (!soleSide && requiredHeight > GROUP_LANE_HEIGHT) ? (Number(state.expandedGroupHeights.get(category)) || 0) : 0;
       result.set(category, {
         category,
         soleSide,
@@ -3249,7 +3267,7 @@
       const top = bottom - laneHeight;
       bands.set(category, {
         category, isAbove: true, index, height: laneHeight, axisY,
-        soleSide: Boolean(metric?.soleSide), top, bottom, near: bottom, far: top
+        soleSide: Boolean(metric?.soleSide), pointRows: metric?.pointRows || 0, requiredHeight: metric?.requiredHeight || laneHeight, top, bottom, near: bottom, far: top
       });
       primaryCursor = top;
     });
@@ -3262,7 +3280,7 @@
       const bottom = top + laneHeight;
       bands.set(category, {
         category, isAbove: false, index, height: laneHeight, axisY,
-        soleSide: Boolean(metric?.soleSide), top, bottom, near: top, far: bottom
+        soleSide: Boolean(metric?.soleSide), pointRows: metric?.pointRows || 0, requiredHeight: metric?.requiredHeight || laneHeight, top, bottom, near: top, far: bottom
       });
       referenceCursor = bottom;
     });
@@ -3304,13 +3322,31 @@
   }
 
   function drawEvents(width, height, contentAxisY, displayAxisY = contentAxisY) {
-    // Pack against the complete enabled data set, not just the current viewport.
-    // Group membership is the first layout boundary: each group owns a fixed
-    // vertical band, then Importance decides which records win space inside it.
     const candidates = state.events.filter(event =>
       event.elementType !== 'Title' && state.enabledCategories.has(event.category)
     );
     const threshold = labelThreshold(state.viewEnd - state.viewStart);
+
+    if (!state.laneKeeping) {
+      // Compact legacy-style packing: groups share rows on each side of the
+      // axis. Group color remains on each block/connector, but no lane tint,
+      // lane caption, or overflow disclosure is drawn.
+      const above = candidates.filter(event => isPrimaryCategory(event.category));
+      const below = candidates.filter(event => !isPrimaryCategory(event.category));
+      const abovePoints = above.filter(event => event.elementType !== 'Period');
+      const belowPoints = below.filter(event => event.elementType !== 'Period');
+      const abovePeriods = above.filter(event => event.elementType === 'Period' && event.end != null);
+      const belowPeriods = below.filter(event => event.elementType === 'Period' && event.end != null);
+
+      const abovePointLanes = drawPointRows(abovePoints, width, height, displayAxisY, true, threshold, null, contentAxisY, true);
+      const belowPointLanes = drawPointRows(belowPoints, width, height, displayAxisY, false, threshold, null, contentAxisY, true);
+      drawLeaderLines(displayAxisY);
+      state.pendingLeadersDrawn = true;
+      drawPeriodRows(abovePeriods, width, height, contentAxisY, threshold, true, abovePointLanes, null);
+      drawPeriodRows(belowPeriods, width, height, contentAxisY, threshold, false, belowPointLanes, null);
+      return;
+    }
+
     const bands = groupLaneLayout(contentAxisY);
     drawGroupLaneBands(width, height, bands);
 
@@ -3318,12 +3354,10 @@
     for (const band of bands.values()) {
       const groupEvents = candidates.filter(event => event.category === band.category);
       const points = groupEvents.filter(event => event.elementType !== 'Period');
-      const pointLaneCount = drawPointRows(points, width, height, displayAxisY, band.isAbove, threshold, band);
+      const pointLaneCount = drawPointRows(points, width, height, displayAxisY, band.isAbove, threshold, band, contentAxisY, false);
       pointLaneCounts.set(band.category, pointLaneCount);
     }
 
-    // Connector lines are painted before period blocks so periods naturally
-    // occlude unrelated leaders, matching the pre-recovery renderer behavior.
     drawLeaderLines(displayAxisY);
     state.pendingLeadersDrawn = true;
 
@@ -3359,7 +3393,15 @@
     return width;
   }
 
-  function drawPointRows(events, width, height, axisY, isAbove, threshold, band = null) {
+
+  function eventAnchorSideSuppressed(isAbove, height) {
+    const rawAxisY = Math.max(1, height) * state.axisYRatio;
+    const stickyTop = rawAxisY < AXIS_STICKY_TOP_INSET;
+    const stickyBottom = rawAxisY > height - AXIS_STICKY_BOTTOM_INSET;
+    return (stickyTop && isAbove) || (stickyBottom && !isAbove);
+  }
+
+  function drawPointRows(events, width, height, axisY, isAbove, threshold, band = null, contentAxisY = axisY, unlimited = false) {
     // Higher-importance records get first choice of limited lanes. Date and ID
     // provide deterministic tie-breakers so panning never arbitrarily swaps winners.
     const sorted = [...events].sort((a, b) =>
@@ -3369,11 +3411,15 @@
       String(a.id || '').localeCompare(String(b.id || ''))
     );
     const laneIntervals = [];
-    const maxLabelLanes = band
-      ? Math.max(0, Math.floor(((band.height || GROUP_LANE_HEIGHT) - 26) / 34))
-      : isAbove
-        ? Math.max(0, Math.floor((axisY - 60) / 34) + 1)
-        : Math.max(0, Math.floor((height - axisY - 65) / 34) + 1);
+    const maxLabelLanes = unlimited
+      ? 128
+      : band
+        ? (band.requiredHeight <= band.height + 0.5
+          ? band.pointRows
+          : Math.max(band.pointRows ? 1 : 0, Math.floor(((band.height || GROUP_LANE_HEIGHT) - 26) / 34)))
+        : isAbove
+          ? Math.max(0, Math.floor((axisY - 60) / 34) + 1)
+          : Math.max(0, Math.floor((height - axisY - 65) / 34) + 1);
     let maxLabelLane = -1;
 
     // Allocate compact micro-lanes for touching or overlapping duration spans.
@@ -3431,6 +3477,7 @@
       // label to fit onscreen. The label layer's overflow clipping reveals the
       // visible portion until the complete block has left the viewport.
       if (labelRight <= 0 || labelLeft >= width) return;
+      if (eventAnchorSideSuppressed(isAbove, height)) return;
 
       let lane = 0;
       if (showLabel) {
@@ -3450,7 +3497,10 @@
           maxLabelLane = Math.max(maxLabelLane, lane);
         }
       }
-      if (!showLabel) recordOverflowEvent(event, x, isAbove, band);
+      if (!showLabel) {
+        recordOverflowEvent(event, x, isAbove, band);
+        return;
+      }
 
       const labelHeight = 27;
       const laneGap = 34;
@@ -3458,7 +3508,7 @@
         ? (isAbove
           ? band.bottom - AXIS_BLOCK_CLEARANCE - labelHeight - lane * laneGap
           : band.top + AXIS_BLOCK_CLEARANCE + lane * laneGap)
-        : (isAbove ? axisY - 58 - lane * laneGap : axisY + 36 + lane * laneGap);
+        : (isAbove ? contentAxisY - 58 - lane * laneGap : contentAxisY + 36 + lane * laneGap);
 
       // Theme-specific attachment geometry:
       // - Gradient joins the straight portion of the rounded left edge.
