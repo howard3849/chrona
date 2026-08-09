@@ -4548,19 +4548,53 @@
   }
 
   function onTimelineKeyDown(event) {
-    if (event.key === 'Escape' && !detailPanel.hidden) { closeDetails(); return; }
-    if (!['ArrowLeft','ArrowRight','Enter'].includes(event.key)) return;
-    const candidates = state.events.filter(e => state.enabledCategories.has(e.category)).sort((a,b) => a.start-b.start);
-    if (!candidates.length) return;
-    let index = state.selectedEvent ? candidates.findIndex(e => e.id === state.selectedEvent.id) : -1;
-    if (event.key === 'ArrowRight') index = Math.min(candidates.length - 1, index + 1);
-    if (event.key === 'ArrowLeft') index = Math.max(0, index < 0 ? 0 : index - 1);
-    if (event.key === 'Enter' && state.selectedEvent) { openDetails(state.selectedEvent); return; }
-    state.selectedEvent = candidates[index];
-    const center = state.selectedEvent.start;
-    const span = state.viewEnd - state.viewStart;
-    state.viewStart = center - span / 2;
-    state.viewEnd = center + span / 2;
+    if (event.key === 'Escape' && !detailPanel.hidden) {
+      closeDetails();
+      return;
+    }
+    if (event.key === 'Enter' && state.selectedEvent) {
+      openDetails(state.selectedEvent);
+      return;
+    }
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+
+    // Never steal caret/navigation keys from editable controls.
+    if (event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    event.preventDefault();
+
+    if (isPhoneVerticalMode()) {
+      // Phone timeline is vertical-in-time, so up/down pan through chronology.
+      if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      const span = state.viewEnd - state.viewStart;
+      const fraction = event.shiftKey ? 0.18 : 0.025;
+      const delta = span * fraction * (event.key === 'ArrowDown' ? 1 : -1);
+      clampView(state.viewStart + delta, state.viewEnd + delta);
+      scheduleRender();
+      return;
+    }
+
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      // Right arrow moves timeline content left, revealing later years; left is
+      // the inverse. Browser key-repeat makes holding the key continuously pan.
+      const span = state.viewEnd - state.viewStart;
+      const fraction = event.shiftKey ? 0.18 : 0.025;
+      const delta = span * fraction * (event.key === 'ArrowRight' ? 1 : -1);
+      clampView(state.viewStart + delta, state.viewEnd + delta);
+    } else {
+      // Up arrow moves content upward (revealing lower groups); Down moves it
+      // downward (revealing upper groups). Shift advances about one large lane.
+      const rect = viewport.getBoundingClientRect();
+      const pixels = event.shiftKey ? Math.max(GROUP_LANE_HEIGHT, rect.height * 0.18) : Math.max(14, rect.height * 0.025);
+      const ratioDelta = pixels / Math.max(1, rect.height);
+      state.axisYRatio = Math.max(
+        DESKTOP_AXIS_MIN_RATIO,
+        Math.min(
+          DESKTOP_AXIS_MAX_RATIO,
+          state.axisYRatio + (event.key === 'ArrowDown' ? ratioDelta : -ratioDelta)
+        )
+      );
+      localStorage.setItem('chrona-axis-y-ratio', String(state.axisYRatio));
+    }
     scheduleRender();
   }
 
@@ -4798,27 +4832,54 @@
       const periodTop = Math.max(pointTop + pointArea + 2, h * .60);
       const periodArea = Math.max(6, h - periodTop - 2);
 
-      points.forEach((event, index) => {
+      const verticalGeometry = overviewVerticalGeometry();
+      const radarBands = groupLaneLayout(0);
+      const worldToRadarY = worldY =>
+        ((worldY - verticalGeometry.contentMin) / Math.max(1, verticalGeometry.contentSpan)) * rect.height;
+      const groupPointIndex = new Map();
+      const groupPointTotals = new Map();
+      points.forEach(event => groupPointTotals.set(event.category, (groupPointTotals.get(event.category) || 0) + 1));
+
+      points.forEach(event => {
         const x = ((event.start - dataMin) / span) * rect.width;
-        const lanes = 3;
-        const lane = index % lanes;
-        const y = pointTop + lane * (pointArea / lanes);
+        const band = radarBands.get(event.category);
+        if (!band) return;
+        const index = groupPointIndex.get(event.category) || 0;
+        groupPointIndex.set(event.category, index + 1);
+        const maxRows = Math.max(1, Math.floor((band.height - AXIS_BLOCK_CLEARANCE * 2) / 34));
+        const row = index % maxRows;
+        const worldY = band.isAbove
+          ? band.bottom - AXIS_BLOCK_CLEARANCE - 13.5 - row * 34
+          : band.top + AXIS_BLOCK_CLEARANCE + 13.5 + row * 34;
+        const y = worldToRadarY(worldY);
         overviewCtx.fillStyle = event.color;
-        overviewCtx.fillRect(Math.max(0, Math.min(rect.width - 1, x)), y, 2, Math.max(5, pointArea / lanes - 1));
+        overviewCtx.fillRect(
+          Math.max(0, Math.min(rect.width - 1, x)),
+          Math.max(0, Math.min(rect.height - 3, y - 2)),
+          2,
+          5
+        );
       });
 
-      periods.forEach((event, index) => {
+      const groupPeriodIndex = new Map();
+      periods.forEach(event => {
         const x1 = ((event.start - dataMin) / span) * rect.width;
         const x2 = ((event.end - dataMin) / span) * rect.width;
-        const lanes = Math.max(1, Math.min(3, periods.length));
-        const laneHeight = Math.max(2, periodArea / lanes);
-        const y = periodTop + (index % lanes) * laneHeight;
+        const band = radarBands.get(event.category);
+        if (!band) return;
+        const index = groupPeriodIndex.get(event.category) || 0;
+        groupPeriodIndex.set(event.category, index + 1);
+        // Periods sit farther from the axis than point rows, but remain inside
+        // their actual group band and therefore share the lens projection.
+        const offset = Math.min(band.height - 8, AXIS_BLOCK_CLEARANCE + 42 + index * 10);
+        const worldY = band.isAbove ? band.bottom - offset : band.top + offset;
+        const y = worldToRadarY(worldY);
         overviewCtx.fillStyle = event.color;
         overviewCtx.fillRect(
           Math.max(0, Math.min(rect.width, x1)),
-          y,
+          Math.max(0, Math.min(rect.height - 3, y - 1)),
           Math.max(1, Math.min(rect.width, x2) - Math.max(0, x1)),
-          Math.max(2, laneHeight - 1)
+          3
         );
       });
 
@@ -4826,8 +4887,8 @@
       const right = ((state.viewEnd - dataMin) / span) * rect.width;
       const clampedLeft = Math.max(0, Math.min(rect.width, left));
       const clampedRight = Math.max(0, Math.min(rect.width, right));
-      // Radar lens is a miniature of the actual vertically scrollable content.
-      const vertical = overviewVerticalGeometry();
+      // Lens uses the exact same world-to-radar geometry as miniature content.
+      const vertical = verticalGeometry;
       const lensFraction = Math.min(1, vertical.viewportHeight / vertical.contentSpan);
       const verticalWindowHeight = Math.max(10, rect.height * lensFraction);
       let verticalTop = 0;

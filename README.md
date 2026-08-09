@@ -45,6 +45,10 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Version history
 
+### 2.8.5
+
+Added direct keyboard panning: arrow keys move the timeline horizontally/vertically, Shift accelerates each step, and native key repeat provides continuous travel while a key is held. Corrected the desktop radar so miniature point/period marks and the viewport lens share the same group/world-Y projection instead of placing event marks in arbitrary decorative rows; radar drag and keyboard/mouse panning now update the same vertical viewport model.
+
 ### 2.8.4
 
 Made a single enabled group on either side of the axis auto-expand without the preset lane-height restriction, added symmetric axis-facing block clearance, corrected the yellow cursor year/relative-label spacing to use one shared gap, and upgraded the desktop/tablet radar lens to true 2D navigation: drag vertically or diagonally to move through timeline groups, click empty radar space to jump in both dimensions, while left/right lens edges continue controlling time zoom.
