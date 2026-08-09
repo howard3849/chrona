@@ -16,15 +16,11 @@ readme = readme_path.read_text()
 
 assert '2.8.5' in index
 
-# State for one canonical zoom-dependent packing model shared by lanes and radar.
 js = js.replace(
 "    expandedGroupHeights: new Map(),\n",
 "    expandedGroupHeights: new Map(),\n    adaptiveGroupLayout: new Map(),\n",
 1)
 
-# Replace the previous single-group/static lane calculation with a zoom-dependent
-# canonical packing estimate. Automatic lane height may shrink, but never grow
-# beyond GROUP_LANE_HEIGHT. Explicit cluster expansion may still exceed that cap.
 start = js.index('  function singleGroupNaturalHeight(category) {')
 end = js.index('  function drawGroupLaneBands(', start)
 replacement = r'''  function computeAdaptiveGroupLayout(width = Math.max(1, viewport.clientWidth || 1)) {
@@ -132,8 +128,6 @@ replacement = r'''  function computeAdaptiveGroupLayout(width = Math.max(1, view
 '''
 js = js[:start] + replacement + js[end:]
 
-# Give each group a very light version of its own color while retaining the
-# existing stronger event/connector colors. Keep the tint deliberately subtle.
 old = """      // Lane interiors are intentionally transparent; only the boundary and
       // caption identify the group so the canvas hue remains continuous.
       const boundaryY = band.isAbove ? band.top : band.bottom;"""
@@ -145,15 +139,10 @@ new = """      // A very light group tint provides spatial identity without comp
 assert old in js
 js = js.replace(old,new,1)
 
-# Only event/period BLOCKS are detail hit targets. Duration spans, anchor dots,
-# and connector lines remain visual/navigation surfaces and cannot open details.
 js = re.sub(r"\n\s*state\.hitTargets\.push\(\{ event, x1: clippedLeft, x2: clippedRight, y1: spanY - 5, y2: spanY \+ 5 \}\);", "", js)
 js = re.sub(r"\n\s*state\.hitTargets\.push\(\{ event, x1: leaderX - 10, x2: leaderX \+ 10, y1: spanY - 10, y2: spanY \+ 10 \}\);", "", js)
 js = re.sub(r"\n\s*state\.hitTargets\.push\(\{ event, x1: leaderX - 5, x2: leaderX \+ 5, y1: Math\.min\(spanY, leaderEndY\), y2: Math\.max\(spanY, leaderEndY\) \}\);", "", js)
 
-# Radar desktop miniature now consumes the exact canonical adaptive packing
-# metrics used to size the real lanes. This updates on every zoom because x
-# collision packing is recomputed using the current view scale.
 radar_start = js.index('      const verticalGeometry = overviewVerticalGeometry();')
 radar_end = js.index('      const left = ((state.viewStart - dataMin) / span) * rect.width;', radar_start)
 radar_block = r'''      const verticalGeometry = overviewVerticalGeometry();
@@ -194,7 +183,6 @@ radar_block = r'''      const verticalGeometry = overviewVerticalGeometry();
 '''
 js = js[:radar_start] + radar_block + js[radar_end:]
 
-# Version sync.
 (ROOT/'VERSION').write_text('2.8.6\n')
 index = index.replace('2.8.5','2.8.6')
 version_js = version_js.replace('2.8.5','2.8.6')
@@ -223,3 +211,5 @@ assert 'x1: leaderX - 10' not in final
 assert 'x1: clippedLeft, x2: clippedRight, y1: spanY - 5' not in final
 assert 'v2.8.6' in index_path.read_text() and '?v=2.8.6' in index_path.read_text()
 print('Chrona 2.8.6 patch applied')
+
+# trigger
