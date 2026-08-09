@@ -9,8 +9,9 @@ VERSION_FILE="$REPO_DIR/VERSION"
 INDEX_FILE="$REPO_DIR/index.html"
 VERSION_JS="$REPO_DIR/version.js"
 README_FILE="$REPO_DIR/README.md"
+CHANGELOG_FILE="$REPO_DIR/docs/CHANGELOG.md"
 
-if [[ ! -f "$VERSION_FILE" || ! -f "$INDEX_FILE" || ! -f "$REPO_DIR/timeline.js" || ! -f "$README_FILE" ]]; then
+if [[ ! -f "$VERSION_FILE" || ! -f "$INDEX_FILE" || ! -f "$REPO_DIR/timeline.js" || ! -f "$README_FILE" || ! -f "$CHANGELOG_FILE" ]]; then
   echo "ERROR: Run this tool from a complete Chrona project."
   exit 1
 fi
@@ -29,7 +30,7 @@ else
 fi
 
 if [[ ! "$next" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "ERROR: Version must use MAJOR.MINOR.PATCH format, such as 2.1.18."
+  echo "ERROR: Version must use MAJOR.MINOR.PATCH format, such as 2.8.9."
   exit 1
 fi
 
@@ -49,7 +50,6 @@ if command -v node >/dev/null 2>&1; then
   done < <(find . -type f -name '*.js' ! -path './.git/*' ! -path './release/*' | sort)
 fi
 
-# Verify the runtime source and all cache references use exactly VERSION.
 errors=0
 if ! grep -Fq "window.CHRONA_VERSION = '$next';" "$VERSION_JS"; then
   echo "ERROR: version.js does not match VERSION."
@@ -67,11 +67,10 @@ if ! grep -Fq "id=\"appVersion\">v$next<" "$INDEX_FILE"; then
   errors=1
 fi
 
-if ! grep -Eq "^### ${next//./\.}$" "$README_FILE"; then
-  echo "ERROR: README.md is missing a version-history entry for $next."
+if ! grep -Eq "^## ${next//./\.}$" "$CHANGELOG_FILE"; then
+  echo "ERROR: docs/CHANGELOG.md is missing a release entry for $next."
   errors=1
 fi
-
 
 if (( errors != 0 )); then
   exit 1
@@ -82,7 +81,6 @@ mkdir -p "$release_dir"
 zip_path="$release_dir/chrona-v${next}-update.zip"
 rm -f "$zip_path"
 
-# Files are stored at ZIP root so users can unzip directly into the existing repo.
 zip -qr "$zip_path" . \
   -x '.git/*' \
   -x 'release/*' \
@@ -97,4 +95,5 @@ echo
 echo "Chrona release finalized"
 echo "Version: $next"
 echo "Conflicting version references: none"
+echo "Changelog entry: docs/CHANGELOG.md"
 echo "Package: $zip_path"
