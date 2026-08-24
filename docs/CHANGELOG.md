@@ -2,6 +2,14 @@
 
 This file is the single source of truth for Chrona release history. Historical per-release Markdown files were consolidated here during the repository cleanup after v2.8.8.
 
+## 2.9.1
+
+- Expanded the bundled historical sample so all 66 events include aligned media and thumbnail URLs in both the browser data and downloadable workbook.
+- Repaired `sample-timeline.xlsx` as the sole canonical starter workbook, preserving its current `Timeline Data` and `Config` sheets while removing obsolete duplicate workbook paths.
+- Added a reproducible workbook-to-browser sample-data builder and integrated it into release finalization so the two sample representations remain synchronized.
+- Added load-time and generated-version thumbnail normalization so an event's media URL remains available when a separate thumbnail value is absent.
+- Consolidated project, release, and deployment guidance into the authoritative README, changelog, deployment guide, and agent workflow documents.
+
 ## 2.8.8
 - Added a persistent Lane-keeping toggle beside the visible-group pills. Off restores compact mixed-group packing; on keeps separated group lanes.
 - Fixed adaptive lane sizing so one visible row always receives one render row and stale cluster expansion no longer leaves oversized empty lanes after zoom/pan changes.

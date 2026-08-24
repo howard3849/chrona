@@ -49,7 +49,7 @@ Human translation columns take priority. When a translated cell is missing, Chro
 
 ## Current version
 
-**v2.8.8**
+**v2.9.1**
 
 See [`docs/CHANGELOG.md`](docs/CHANGELOG.md) for the complete release history.
 
