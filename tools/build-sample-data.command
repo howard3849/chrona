@@ -10,5 +10,5 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 exec python3 "$SCRIPT_DIR/build-sample-data.py" \
-  "$REPO_DIR/chrona-sample-timeline.xlsx" \
+  "$REPO_DIR/sample-timeline.xlsx" \
   "$REPO_DIR/sample-data.js"
