@@ -123,6 +123,14 @@ def build(workbook: Path, output: Path) -> tuple[int, int, int]:
     if missing_ids:
         raise RuntimeError(f"Timeline rows missing Event ID: {missing_ids}")
 
+    # A Media URL is also a valid timeline thumbnail unless the workbook
+    # explicitly supplies a separate Media Thumbnail. This keeps sample data
+    # compatible with redirected/image-service URLs that do not end in .jpg/.png.
+    for event in events:
+        media = str(event.get("Media") or "").strip()
+        if media and not event.get("Media Thumbnail"):
+            event["Media Thumbnail"] = media
+
     payload = {"config": config, "categories": categories, "events": events}
     text = (
         "/*\n"
