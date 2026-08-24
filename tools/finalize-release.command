@@ -10,11 +10,16 @@ INDEX_FILE="$REPO_DIR/index.html"
 VERSION_JS="$REPO_DIR/version.js"
 README_FILE="$REPO_DIR/README.md"
 CHANGELOG_FILE="$REPO_DIR/docs/CHANGELOG.md"
+SAMPLE_WORKBOOK="$REPO_DIR/chrona-sample-timeline.xlsx"
+SAMPLE_BUILDER="$SCRIPT_DIR/build-sample-data.command"
 
-if [[ ! -f "$VERSION_FILE" || ! -f "$INDEX_FILE" || ! -f "$REPO_DIR/timeline.js" || ! -f "$README_FILE" || ! -f "$CHANGELOG_FILE" ]]; then
+if [[ ! -f "$VERSION_FILE" || ! -f "$INDEX_FILE" || ! -f "$REPO_DIR/timeline.js" || ! -f "$README_FILE" || ! -f "$CHANGELOG_FILE" || ! -f "$SAMPLE_WORKBOOK" || ! -f "$SAMPLE_BUILDER" ]]; then
   echo "ERROR: Run this tool from a complete Chrona project."
   exit 1
 fi
+
+echo "Rebuilding bundled sample data..."
+"$SAMPLE_BUILDER"
 
 current="$(tr -d '[:space:]' < "$VERSION_FILE")"
 requested="${1:-}"
